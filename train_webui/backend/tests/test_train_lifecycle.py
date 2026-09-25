@@ -143,6 +143,47 @@ def test_job_log_endpoint_reads_local_ingested_log(app_factory):
     assert resp2.json()["data"] == ""
 
 
+def _draft_with_reserved_job(client, settings, app):
+    """起動処理の途中（job行はあるがpid未記録）の状態を作る。"""
+    write_project(settings.repo_root, "proj_a")
+    run = client.post("/api/runs/draft", json={"project": "proj_a", "group": "g1", "new_group": True}).json()
+    app.state.job_manager._reserve_job(run["run_id"], kind="train")
+    app.state.db.update_run(run["run_id"], status="running")
+    return run
+
+
+def test_stop_during_launch_409(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    run = _draft_with_reserved_job(client, settings, app)
+    resp = client.post(f"/api/runs/{run['run_id']}/stop")
+    assert resp.status_code == 409
+    assert remote.stops == []
+
+
+def test_interrupted_launch_is_failed_on_restart(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    run = _draft_with_reserved_job(client, settings, app)
+    app2, _, _ = app_factory(start_background=True)  # 同じDBを開き直す＝server再起動
+    got = TestClient(app2).get(f"/api/runs/{run['run_id']}").json()
+    assert got["status"] == "failed"
+    assert got["jobs"][0]["status"] == "failed"
+    assert TestClient(app2).get("/api/state").json()["busy"] is False
+
+
+def test_poll_does_not_touch_job_being_stopped(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    run = _draft_and_start(client, settings)
+    job_id = run["jobs"][0]["job_id"]
+    pid = next(iter(remote.poll_results))
+    remote.set_finished(pid, exit_code=143)
+    app.state.job_manager._stopping.add(job_id)
+    app.state.job_manager.poll_once()
+    assert app.state.db.get_job(job_id)["status"] == "running"
+
+
 def test_job_log_unknown_job_404(app_factory):
     app, settings, remote = app_factory()
     client = TestClient(app)

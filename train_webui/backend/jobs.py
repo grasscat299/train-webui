@@ -1,7 +1,7 @@
 """ジョブ管理（CONTRACT.md §3）。起動フロー（sync_code → launch → DB更新）とポーリングループ。
 
 remote（学習用PC操作）呼び出しで例外が出た場合は何でも捕まえて run/job を failed にし、
-メッセージを error に入れる（担当Cの RemoteError はまだ無いので、それに依存しない構造にする）。
+メッセージを error に入れる。
 """
 from __future__ import annotations
 
@@ -21,21 +21,33 @@ class JobBusyError(Exception):
 
 
 class JobManager:
-    def __init__(self, settings: Settings, db: Database, remote: RemoteControllerProtocol) -> None:
+    def __init__(self, settings: Settings, db: Database, remote: RemoteControllerProtocol,
+                 launch_in_background: bool = True) -> None:
         self._settings = settings
         self._db = db
         self._remote = remote
+        self._launch_in_background = launch_in_background
         self._launch_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._stopping: set[str] = set()
+        self._stopping_lock = threading.Lock()
 
     # ---- バックグラウンドループ ------------------------------------
 
     def start_background(self) -> None:
         if self._thread is not None:
             return
+        self._fail_interrupted_launches()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+
+    def _fail_interrupted_launches(self) -> None:
+        """pid未記録のrunningジョブ＝前回server停止時に起動処理の途中だったもの。放置するとbusyが解けない。"""
+        for job in self._db.list_running_jobs():
+            if job["pid"] is None:
+                self._fail_job_and_run(job["job_id"], job["run_id"], "server再起動により起動処理が中断されました",
+                                       also_run=job["kind"] == "train")
 
     def shutdown(self) -> None:
         self._stop_event.set()
@@ -73,13 +85,21 @@ class JobManager:
     # ---- 起動 --------------------------------------------------------
 
     def start_train(self, run_id: str) -> None:
-        """draft を起動する（sync_code → launch → DB更新）。呼び出し側は事前に draft か確認しておく。"""
+        """draft を起動する。jobを確保したら戻り、sync_code → launch は裏で進める（rsyncが長いため）。"""
         run = self._db.get_run(run_id)
         if run is None:
             raise ValueError("run が見つかりません")
         job_id = self._reserve_job(run_id, kind="train")
-        now = now_iso()
-        self._db.update_run(run_id, status="running", started_at=now)
+        self._db.update_run(run_id, status="running", started_at=now_iso())
+        self._spawn(self._launch_train, run_id, job_id, run)
+
+    def _spawn(self, fn, *args) -> None:
+        if self._launch_in_background:
+            threading.Thread(target=fn, args=args, daemon=True).start()
+        else:
+            fn(*args)
+
+    def _launch_train(self, run_id: str, job_id: str, run: dict) -> None:
         try:
             sync_info = self._remote.sync_code()
             self._db.create_sync(
@@ -105,6 +125,12 @@ class JobManager:
         if run is None:
             raise ValueError("run が見つかりません")
         job_id = self._reserve_job(run_id, kind="infer")
+        self._spawn(self._launch_infer, run_id, job_id, run, project)
+        job = self._db.get_job(job_id)
+        assert job is not None
+        return job
+
+    def _launch_infer(self, run_id: str, job_id: str, run: dict, project: str) -> None:
         try:
             sync_info = self._remote.sync_code()
             self._db.create_sync(
@@ -119,9 +145,6 @@ class JobManager:
             self._db.update_job(job_id, pid=result.pid, job_dir=result.job_dir)
         except Exception as e:  # noqa: BLE001
             self._fail_job_and_run(job_id, run_id, str(e), also_run=False)
-        job = self._db.get_job(job_id)
-        assert job is not None
-        return job
 
     def _reserve_job(self, run_id: str, kind: str) -> str:
         """busyチェックとjob行の作成をロック内でアトミックに行う（2重起動レース対策）。"""
@@ -147,24 +170,34 @@ class JobManager:
         job = self._db.get_running_job_for_run(run_id)
         if job is None:
             raise ValueError("停止対象のジョブがありません")
-        error = None
-        if job["pid"] is not None:
+        if job["pid"] is None:
+            # ここで stopped にすると、裏の起動処理がこの後プロセスを立ち上げてWebUIの管理外に残る
+            raise ValueError("起動処理中のため停止できません。数秒後にもう一度試してください")
+        with self._stopping_lock:
+            self._stopping.add(job["job_id"])
+        try:
+            error = None
             try:
                 self._remote.stop(job["pid"])
             except Exception as e:  # noqa: BLE001
                 error = str(e)
-        if job["job_dir"] is not None:
             self._pull_log(job)
-        now = now_iso()
-        self._db.update_job(job["job_id"], status="stopped", ended_at=now, error=error)
-        if job["kind"] == "train":
-            self._db.update_run(run_id, status="stopped", ended_at=now)
+            now = now_iso()
+            self._db.update_job(job["job_id"], status="stopped", ended_at=now, error=error)
+            if job["kind"] == "train":
+                self._db.update_run(run_id, status="stopped", ended_at=now)
+        finally:
+            with self._stopping_lock:
+                self._stopping.discard(job["job_id"])
 
     # ---- ポーリング ----------------------------------------------------
 
     def _poll_one_job(self, job: dict) -> None:
         if job["job_dir"] is None or job["pid"] is None:
             return  # launchがまだ完了していない（起動処理のスレッド側で進行中）
+        with self._stopping_lock:
+            if job["job_id"] in self._stopping:
+                return  # 停止処理側が stopped で確定させる（ここで failed と書くと競合する）
         self._pull_log(job)
         try:
             state = self._remote.poll(job["pid"], job["job_dir"])

@@ -1,6 +1,4 @@
-"""担当Bのテスト用フィクスチャ。担当Cの RemoteController はまだ無いので、
-RemoteControllerProtocol を満たす FakeRemote に差し替えてテストする。
-"""
+"""backendのテスト用フィクスチャ。学習用PCに触れないよう、RemoteControllerProtocol を満たす FakeRemote に差し替える。"""
 from __future__ import annotations
 
 from pathlib import Path

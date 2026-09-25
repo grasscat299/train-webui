@@ -154,7 +154,7 @@ def create_app(
     settings.server.media_dir.mkdir(parents=True, exist_ok=True)
     db = Database(settings.server.db_path)
     db.init_schema()
-    job_manager = JobManager(settings, db, remote)
+    job_manager = JobManager(settings, db, remote, launch_in_background=start_background)
     if start_background:
         job_manager.start_background()
 
