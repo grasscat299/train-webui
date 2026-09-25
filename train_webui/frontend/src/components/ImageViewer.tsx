@@ -10,7 +10,9 @@ export function ImageViewer({ images }: { images: ImageResult[] }) {
   const current = sorted[clamped];
   return (
     <div className="image-viewer">
-      <img src={current.image_url} alt={current.label} />
+      <a href={current.image_url} target="_blank" rel="noreferrer" title="クリックで元の大きさで開く">
+        <img src={current.image_url} alt={current.label} />
+      </a>
       <div className="image-viewer-controls">
         <button disabled={clamped >= sorted.length - 1} onClick={() => setIndex(clamped + 1)}>
           ◀ 過去へ

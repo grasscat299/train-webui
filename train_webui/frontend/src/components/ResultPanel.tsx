@@ -134,7 +134,13 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
                       <div className="image-cell-title">
                         {id} ({runMetaMap[id]?.group ?? '-'})
                       </div>
-                      {latest ? <img src={latest.image_url} alt={l.label} /> : <div className="no-image">画像なし</div>}
+                      {latest ? (
+                        <a href={latest.image_url} target="_blank" rel="noreferrer" title="クリックで元の大きさで開く">
+                          <img src={latest.image_url} alt={l.label} />
+                        </a>
+                      ) : (
+                        <div className="no-image">画像なし</div>
+                      )}
                     </div>
                   );
                 })}
