@@ -1,0 +1,6 @@
+# ローカルPCの WebUI server 用（学習用PCには不要。client は標準ライブラリのみ）
+fastapi
+uvicorn
+tomli
+httpx
+pytest

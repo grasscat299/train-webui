@@ -1,0 +1,37 @@
+# 学習管理WebUI server の設定（design.md §1.5）。初回は `cp server.example.toml server.toml`。
+# server.toml は git 管理しない。相対パスはリポジトリ直下（td_plan/）からの相対。
+
+[remote]                                   # 学習用PC
+host             = "gpu-host.example"      # ~/.ssh/config の Host エイリアスでも可
+user             = "user"
+port             = 22
+key_path         = "~/.ssh/id_ed25519"
+repo_dir         = "/home/user/td_plan"          # 学習用PC上のリポジトリ（コード同期先）
+sif_path         = "/path/to/image.sif"               # singularity image
+python           = "venv/bin/python"                  # repo_dir からの相対パス
+run_root         = "/home/user/train_webui_runs"  # run.log / run.pid / run.exit（repo_dirの外）
+singularity_args = ["--nv"]                           # singularity exec に渡す追加引数
+stop_timeout_sec = 10                                 # SIGTERM後、SIGKILLまで待つ秒数
+
+[server]                                   # ローカルPC(WSL)のWebUI server
+host       = "0.0.0.0"
+port       = 8000
+public_url = "http://100.x.x.x:8000"       # 学習用PCから見たこのserverのURL（tailscaleのIP）
+db_path    = "train_webui/data/webui.sqlite"
+media_dir  = "train_webui/data/media"      # 受信画像・取り込んだrun.log
+
+[log]
+poll_interval_sec = 1.5                    # run.log の pull / ジョブ生存確認の間隔
+
+[heartbeat]
+lost_after_sec = 180                       # CLI起動runのheartbeatがこの秒数途絶えたら lost
+
+[sync]
+# コードrsync（design.md §4.5）で除外するパス（rsyncの --exclude パターン）。
+exclude = [
+  ".git/", "venv/", ".venv/", "wandb/", "__pycache__/", "*.pyc",
+  "checkpoints/", "samples/", "config.toml",
+  "data/", "scratch/*/data/", "scratch/prts_survey/output/",
+  "train_webui/data/", "train_webui/frontend/", "train_webui/server.toml",
+  ".claude/", ".dvc/", ".pytest_cache/", "logs/", "papers/", "textbooks/",
+]
