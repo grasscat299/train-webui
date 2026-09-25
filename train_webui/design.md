@@ -212,7 +212,7 @@ DVC（run管理機能・checkpoint/データ管理とも）は使わない。コ
   ジョブ途中から別のコードで動きうる。起動時の1回に限定することで「ジョブが使ったコード」を固定する。
 - `--delete` を付ける（ローカルで消した `.py` が学習用PCに残って import されるのを防ぐ）。その代わり、
   学習用PCにしか無いものは除外する：`venv/`（学習用PC側で別途作る）、`.git/` `wandb/`
-  `__pycache__/`、`checkpoints/` `samples/`（学習用PCで生成されるもの）、各projectの `config.toml`
+  `__pycache__/`、`checkpoints/*` `samples/*`（学習用PCで生成されるもの。中身だけ除外し、保存先のディレクトリ自体は作る）、各projectの `config.toml`
   （起動時にWebUIが書き込む）、データディレクトリ（下記）。
 - `train_webui/` は client（§5）を含むので同期対象に含める（server側のコード・`data/` は除外）。
 - 送る時に `git rev-parse HEAD`、`git diff`、未追跡（untracked）ファイルの一覧と中身を取り、runに
