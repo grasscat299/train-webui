@@ -42,7 +42,10 @@
   SSHセッションから切り離して実行することで、WebUI側の接続が切れてもジョブは継続する。
 - **ネットワーク**: ローカルPCはWSL2（NATモード）だが、WSL上でtailscaleを張っているため、学習用PCから
   WSL上のserverへtailscaleのIPで直接到達できる。`server.toml` の `public_url` はtailscaleのIPを書く。
-- **認証は無し**（決定事項）。
+- **認証は無し**（決定事項）。代わりに**VPN（tailscale）内からのみアクセスできる**ようにする：全リクエストの
+  接続元IPを確認し、`server.toml` の `allowed_networks`（既定: tailscaleの `100.64.0.0/10`・
+  `fd7a:115c:a1e0::/48` と loopback）に入っていなければ403を返す。listenアドレスは `0.0.0.0` のまま
+  （tailscale IPだけにbindすると、Windows側ブラウザから `localhost` で開けなくなるため）。
 
 ## 1.5 server設定ファイル（接続先などはコードに書かず外出し）
 
@@ -391,7 +394,8 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
 - モードは `train` / `infer` の2つに固定。`eval` / `ddpo` のような追加モードは持たせず、
   `config.toml` 側の設定でtrainモード内の挙動として切り替える（§2）。
 - `config.toml` の `[wandb]` セクション名・`project`/`group`キーは維持する。
-- ネットワークはWSL上のtailscale経由で学習用PC→serverへ到達する。認証は無し。
+- ネットワークはWSL上のtailscale経由で学習用PC→serverへ到達する。認証は無しだが、接続元IPで
+  VPN（tailscale）内とloopbackに限定する（§1）。
 - 既存プロジェクトの移行は今回スコープ外（フォーマット確定後に行う）。
 - frontend は React、backend は Python + FastAPI。
 - 結果のrunへの紐づけ: WebUIから起動したジョブは環境変数の `run_id`、CLI手動実行はclientが

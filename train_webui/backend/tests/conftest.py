@@ -62,10 +62,12 @@ class FakeRemote:
 
 def make_settings(
     tmp_path: Path, repo_root: Path, poll_interval_sec: float = 0.01, lost_after_sec: float = 5.0,
+    allowed_networks: tuple[str, ...] = (),
 ) -> Settings:
     server = ServerSettings(
         host="127.0.0.1", port=0, public_url="http://test.invalid",
         db_path=tmp_path / "webui.sqlite", media_dir=tmp_path / "media",
+        allowed_networks=allowed_networks,
     )
     remote = RemoteSettings(
         host="gpu-host", user="u", port=22, key_path="~/.ssh/id_ed25519",

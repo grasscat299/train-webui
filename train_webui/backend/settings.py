@@ -8,6 +8,8 @@ import tomli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PATH = REPO_ROOT / "train_webui" / "server.toml"
+# tailscale（CGNAT帯とIPv6のULA帯）とこのPC自身からの接続だけを受け付ける
+DEFAULT_ALLOWED_NETWORKS = ("127.0.0.0/8", "::1/128", "100.64.0.0/10", "fd7a:115c:a1e0::/48")
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class ServerSettings:
     public_url: str
     db_path: Path
     media_dir: Path
+    allowed_networks: tuple[str, ...] = DEFAULT_ALLOWED_NETWORKS
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,8 @@ def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
     srv = dict(raw["server"])
     srv["db_path"] = repo_root / srv["db_path"]
     srv["media_dir"] = repo_root / srv["media_dir"]
+    if "allowed_networks" in srv:
+        srv["allowed_networks"] = tuple(srv["allowed_networks"])
     return Settings(
         remote=RemoteSettings(**raw["remote"]),
         server=ServerSettings(**srv),

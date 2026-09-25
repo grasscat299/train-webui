@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import base64
 import binascii
+import ipaddress
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -22,6 +24,18 @@ from .settings import Settings
 from .toml_utils import TomlValidationError, extract_group, set_wandb_group
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+
+
+def _is_allowed_client(host: str | None, networks: list) -> bool:
+    if host is None:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return any(ip in net for net in networks if ip.version == net.version)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +178,15 @@ def create_app(
         job_manager.shutdown()
 
     app = FastAPI(lifespan=lifespan)
+
+    allowed_networks = [ipaddress.ip_network(n) for n in settings.server.allowed_networks]
+    if allowed_networks:  # 空なら制限しない（テスト用）
+        @app.middleware("http")
+        async def restrict_to_vpn(request: Request, call_next):
+            if not _is_allowed_client(request.client.host if request.client else None, allowed_networks):
+                return JSONResponse({"detail": "VPN（tailscale）内からのみアクセスできます"}, status_code=403)
+            return await call_next(request)
+
     app.state.settings = settings
     app.state.db = db
     app.state.job_manager = job_manager

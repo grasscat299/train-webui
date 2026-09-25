@@ -19,6 +19,8 @@ port       = 8000
 public_url = "http://100.x.x.x:8000"       # 学習用PCから見たこのserverのURL（tailscaleのIP）
 db_path    = "train_webui/data/webui.sqlite"
 media_dir  = "train_webui/data/media"      # 受信画像・取り込んだrun.log
+# 接続を受け付ける接続元（これ以外は403）。tailscale の帯域とこのPC自身。
+allowed_networks = ["127.0.0.0/8", "::1/128", "100.64.0.0/10", "fd7a:115c:a1e0::/48"]
 
 [log]
 poll_interval_sec = 1.5                    # run.log の pull / ジョブ生存確認の間隔
