@@ -255,6 +255,8 @@ DVC（run管理機能・checkpoint/データ管理とも）は使わない。コ
   - `client.init(new_run=False, run_id=None, source=None)` … どのrunに結果を送るかを決める（下記）
   - `client.log({"train/loss": 0.1, ...}, step=...)` … 数値
   - `client.log_image("infer/xy", fig_or_path, step=None)` … matplotlibのFigureか画像ファイルパス
+  - `client.define_plot("infer/xy", kind="scatter", xlabel=..., ...)` / `client.log_xy("infer/xy", x, y)`
+    … 軸を定義して点を逐次追加していくグラフ（§5.3）
   - `client.finish()` … 送信キューを吐き出して終了（`new_run` で作ったrunは finished にする）
 
 ### 5.1 `init()` の2つの使い方
@@ -326,6 +328,45 @@ DVC（run管理機能・checkpoint/データ管理とも）は使わない。コ
 - **履歴はすべて保存する**。同じラベルの画像・数値が何度送られても上書きせず、`source` と `sent_at`
   付きで追記する。
 
+### 5.3 軸つきグラフ（plot）: 軸を定義して点を逐次追加する
+
+- `log` の数値グラフは x軸が step 固定、`log_image` は描画済みの画像しか送れない。そこで、
+  matplotlib のように**軸（種類・軸ラベル・スケール・範囲）を定義し、その軸に (x, y) の点を
+  後から追加していく**グラフを持つ。描画は frontend（Recharts）が行うので、画像と違って拡大・
+  ホバーで値確認・複数runの重ね描きができる。
+- 対応する種類は **折れ線（line）** と **散布図（scatter）** の2つ。
+- 1つのグラフ（= 1ラベル）の中に**複数の系列（series）**を持てる（例: `"pred"` と `"target"`）。
+  系列名を省略したら `"default"`。
+- **API**:
+
+  ```python
+  from train_webui import client
+
+  plot = client.define_plot(
+      "infer/xy",            # ラベル（metric/imageと同じ名前空間。同じrunで種類の違う同名ラベルは不可）
+      kind="scatter",        # "line" | "scatter"
+      title="推論結果",       # 省略時はラベル名
+      xlabel="x", ylabel="y",
+      xscale="linear", yscale="log",   # "linear" | "log"
+      xlim=None, ylim=(1e-3, 1.0),     # None なら自動
+  )
+  plot.add(x, y, series="pred")                  # 1点
+  plot.add(xs, ys, series="target")              # 同じ長さの配列でまとめて追加
+  client.log_xy("infer/xy", x, y, series="pred") # ハンドル無しでも同じことができる
+  ```
+
+  - `define_plot` は `Plot` ハンドル（`label` を持つだけの薄いオブジェクト。`add` は `log_xy` を呼ぶ）を返す。
+  - `define_plot` を同じラベルで再度呼んだら**定義を上書き**（点は消さない）。`define_plot` 無しで
+    `log_xy` した場合は既定の定義（line、軸ラベル無し、linear、範囲自動）で表示する。
+  - `x`, `y` はスカラー同士か、同じ長さの配列同士（list/tuple/numpy/torch。`.tolist()` があれば使う）。
+    長さが違う・数値化できない場合は warning を出してその呼び出しごと捨てる。NaN/inf の点は捨てる
+    （JSONに載らないため）。
+  - `step` は任意（`log_xy(..., step=N)`）。表示には使わず、記録として残すだけ。
+- **折れ線は送った順に結ぶ**（xでソートしない。matplotlibの `plot` と同じ）。軌跡のように x が
+  単調でないデータも描ける。
+- 送信は他の結果と同じキュー・同じ `POST /api/results` に乗せる（`log_xy` 1回 = 1 item。
+  配列はそのまま1 itemに入れるので、点が多くてもリクエスト数は増えない）。
+
 ## 6. データモデル（DB: sqlite）
 
 - `runs`: `run_id`, `project`, `group`, `origin`（webui / cli）,
@@ -339,6 +380,12 @@ DVC（run管理機能・checkpoint/データ管理とも）は使わない。コ
   `ended_at`, `exit_code`, `log_path`（終了後にローカルへ取り込んだrun.log）
 - `results`: `id`, `run_id`, `kind`（metric / image）, `label`, `step`, `value`（数値）,
   `image_path`（`media_dir` 内）, `source`, `sent_at`
+- `plots`: `run_id`, `label`, `kind`（line / scatter）, `title`, `xlabel`, `ylabel`, `xscale`, `yscale`,
+  `xmin`, `xmax`, `ymin`, `ymax`（範囲。NULLなら自動）, `defined`（`define_plot` 済みか。0なら既定値）,
+  `updated_at`。主キー (`run_id`, `label`)。
+- `plot_points`: `id`, `run_id`, `label`, `series`, `x`, `y`, `step`, `source`, `sent_at`。
+  点は増え続けるので `results` とは別テーブルにする（`results` の検索を重くしない）。
+  既存DBには `CREATE TABLE IF NOT EXISTS` で足されるだけなので移行処理は不要。
 
 ## 7. 画面構成: 共通ナビゲーション + Train / Result の2タブ
 
@@ -410,6 +457,14 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
 - **数値グラフは重ねて表示**: 同じラベルの系列を、比較対象runぶん1つのグラフに重ねる（run
   ごとに色分け、凡例にrun_idとgroup）。
 - **画像はrunごとに並べる**: ラベルごとに1行、比較対象runを横に並べる。各runの最新の画像を表示する。
+- **軸つきグラフ（plot, §5.3）は重ねて表示**: 同じラベルの全系列を、比較対象runぶん1つの軸に重ねる。
+  - 系列は (run, series) の組ごとに色を変える。凡例は `series @ run_id (group)`（系列が `default`
+    だけなら `run_id (group)`）。
+  - 軸の定義（種類・軸ラベル・スケール・範囲・タイトル）は、比較対象runの中で `updated_at` が最新の
+    定義を使う。run間で定義が食い違う場合はグラフの上に「runによって軸の定義が異なります」と小さく出す。
+  - log スケールの軸に 0 以下の点があれば、その点は描かずに件数を注記する。
+  - 実行中に点が増えていくので、他の結果と同じく3秒ごとに更新する。点は差分（前回取得以降に
+    追加された分）だけ取得する。
 
 ## 10. 決定事項メモ
 
@@ -421,6 +476,7 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
 - ネットワークはWSL上のtailscale経由で学習用PC→serverへ到達する。認証は無しだが、接続元IPで
   VPN（tailscale）内とloopbackに限定する（§1）。
 - 既存プロジェクトの移行は今回スコープ外（フォーマット確定後に行う）。
+- 軸つきグラフ（§5.3）は line / scatter のみ、点の逐次追加方式、複数runは1つの軸に重ね描き。
 - frontend は React、backend は Python + FastAPI。
 - 結果のrunへの紐づけ: WebUIから起動したジョブは環境変数の `run_id`、CLI手動実行はclientが
   serverに問い合わせる（明示指定で上書き可）（§5）。
@@ -429,4 +485,6 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
 
 ## 11. オープンな論点
 
-- （現時点で無し。実装を進める中で出てきたらここに追記する）
+- 軸つきグラフで、1つの軸に折れ線と散布図を混ぜたい（例: 真値は線、サンプルは点）場合の扱い。
+  現状は種類をグラフ単位で持つ。必要になったら系列単位の `kind` 上書きを検討する。
+- 軸つきグラフの点が非常に多くなった場合（数十万点〜）の間引き。現状は全点を返して全点描く。

@@ -72,6 +72,13 @@ train_webui/
 // Result（image）
 {"id": 2, "run_id": "...", "kind": "image", "label": "infer/xy", "step": null,
  "image_url": "/media/images/<run_id>/<id>.png", "source": "infer", "sent_at": "..."}
+
+// Plot（軸つきグラフ、design.md §5.3）: 1ラベル分。series は最初に現れた順、points は id 順（=送信順）
+{"run_id": "...", "label": "infer/xy", "kind": "line" | "scatter", "defined": true,
+ "title": "推論結果", "xlabel": "x", "ylabel": "y", "xscale": "linear" | "log", "yscale": "linear" | "log",
+ "xlim": [0.0, 1.0] | null, "ylim": null, "updated_at": "...",
+ "series": [{"name": "pred", "points": [[x, y], ...]}, ...],
+ "last_point_id": 123 | null}   // このレスポンスに含まれる最大の点id（点が無ければ null）
 ```
 
 ### 2.2 frontend 向け
@@ -90,7 +97,8 @@ train_webui/
 | `POST /api/groups/infer` | body `{"project": str, "group": str}`。そのgroupで最後に起動された train の run（draft以外、origin不問）を対象に infer ジョブを起動。対象runが無ければ404、busyなら409。返り値 Job |
 | `GET /api/jobs/{job_id}/log?offset=N` | `{"data": str, "offset": int, "done": bool}`。ローカルに取り込み済みのログの offset バイト目以降（UTF-8デコード、不正バイトは置換）。`done` はジョブが終了済みかつ全文取り込み済み |
 | `GET /api/runs/{run_id}/results?kind=&label=` | `[Result]`（`sent_at` 古い順）。kind/label は任意の絞り込み |
-| `GET /api/labels?run_ids=a,b,c` | `[{"label": str, "kind": "metric" \| "image"}]`（指定runに現れるラベルの和集合、label順） |
+| `GET /api/labels?run_ids=a,b,c` | `[{"label": str, "kind": "metric" \| "image" \| "plot"}]`（指定runに現れるラベルの和集合、label順。plot は `plots` テーブルから） |
+| `GET /api/runs/{run_id}/plots?label=&after_id=` | `[Plot]`（label順）。label は任意の絞り込み。`after_id` を付けると id がそれより大きい点だけを `points` に入れる（軸の定義は毎回全部返す）。差分で点が無い系列は `points: []` で返す。runが無ければ404 |
 | `GET /media/...` | 画像ファイル（静的配信） |
 
 - frontend は `/api/tree` `/api/state` を 2〜3 秒ごと、表示中の running run の results とログを
@@ -113,7 +121,20 @@ train_webui/
 {"kind": "metric", "label": "train/loss", "step": 100, "value": 0.123, "sent_at": "..."}
 // Item（image）: PNG を base64 で埋め込む（multipart は使わない）
 {"kind": "image", "label": "infer/xy", "step": null, "image_b64": "iVBORw0...", "sent_at": "..."}
+// Item（plot_def）: 軸の定義。同じ (run_id, label) があれば上書き（点は残す）
+{"kind": "plot_def", "label": "infer/xy", "plot_kind": "line" | "scatter", "title": str | null,
+ "xlabel": str, "ylabel": str, "xscale": "linear" | "log", "yscale": "linear" | "log",
+ "xlim": [a, b] | null, "ylim": [a, b] | null, "sent_at": "..."}
+// Item（plot_points）: 点の追加。xs と ys は同じ長さ（1点でも配列）
+{"kind": "plot_points", "label": "infer/xy", "series": "pred", "xs": [0.1, 0.2], "ys": [1.0, 0.8],
+ "step": null, "sent_at": "..."}
 ```
+
+- plot_points の label に plot_def がまだ無ければ、既定の定義（`plot_kind="line"`, title=null,
+  xlabel/ylabel=`""`, linear, lim=null, `defined=0`）で `plots` 行を作る。後から plot_def が来たら上書きして `defined=1`。
+- 同じ run で、plot のラベルが metric/image として既に使われている（またはその逆）なら 400。
+- xs と ys の長さ不一致・非有限値は 400（client 側で弾いている前提の保険）。
+- 1リクエスト内の items は送られた順に処理する（同じバッチ内の plot_def → plot_points の順序を保つ）。
 
 ## 3. backend 内部の境界（担当B ⇔ 担当C）
 
@@ -152,11 +173,34 @@ design.md §6 のテーブル（`runs` / `jobs` / `results` / `syncs`）。ORM�
 画像は `<media_dir>/images/<run_id>/<result_id>.png` に保存し、`results.image_path` に `media_dir` からの
 相対パスを入れる。run 削除時は画像・ログファイルも消す。
 
+軸つきグラフは `plots` / `plot_points` テーブル（design.md §6）。スキーマ：
+
+```sql
+CREATE TABLE IF NOT EXISTS plots (
+    run_id TEXT NOT NULL, label TEXT NOT NULL,
+    kind TEXT NOT NULL, title TEXT, xlabel TEXT NOT NULL, ylabel TEXT NOT NULL,
+    xscale TEXT NOT NULL, yscale TEXT NOT NULL,
+    xmin REAL, xmax REAL, ymin REAL, ymax REAL,
+    defined INTEGER NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, label)
+);
+CREATE TABLE IF NOT EXISTS plot_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL, label TEXT NOT NULL, series TEXT NOT NULL,
+    x REAL NOT NULL, y REAL NOT NULL, step INTEGER,
+    source TEXT NOT NULL, sent_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plot_points_run_label ON plot_points(run_id, label, id);
+```
+
+run 削除時は `plots` / `plot_points` の該当行も消す。
+
 ## 5. client（担当A）
 
 design.md §5 のとおり。追加の取り決め：
 
-- 公開APIは `train_webui/client/__init__.py` から `init, log, log_image, finish` を関数として export
+- 公開APIは `train_webui/client/__init__.py` から `init, log, log_image, define_plot, log_xy, finish` を関数として、
+  `Plot` をクラスとして export
   （モジュールレベルの状態を1つ持つ、wandb と同じ書き味）。`init` 前に `log` 等が呼ばれたら warning で無視。
 - 送信は daemon スレッド＋キュー。`log` はキューに積むだけで即 return。まとめて `POST /api/results`
   （例: 0.5秒ごと or 50件ごと）。送信タイムアウトは短く（例 5秒）、失敗は warning を出して捨てる。
@@ -166,6 +210,13 @@ design.md §5 のとおり。追加の取り決め：
   traceback を付けて status=failed で finish を送る。
 - `log_image` は matplotlib の Figure（`savefig` で PNG 化）か画像ファイルパスを受け付ける。matplotlib は
   import しない（Figure は duck typing で `savefig` を呼ぶ）。
+- `define_plot(label, kind="line", title=None, xlabel="", ylabel="", xscale="linear", yscale="linear",
+  xlim=None, ylim=None) -> Plot`（design.md §5.3）。引数の値が不正（kind/scale が候補外、lim が2要素の
+  数値でない）なら warning を出して送らない。init 前・送信無効でも `Plot` は返す（`add` が黙って無視されるだけ）。
+- `log_xy(label, x, y, series="default", step=None)`。x/y はスカラーか配列（`.tolist()` があれば呼ぶ）。
+  各要素を `float()` し、長さ不一致・変換失敗は warning を出して呼び出しごと捨てる。NaN/inf の点は
+  その点だけ捨て、捨てた件数を warning に出す。残りが0点なら送らない。numpy/torch は import しない。
+- `Plot` は `label` を持つだけ。`Plot.add(x, y, series="default", step=None)` は `log_xy(self.label, ...)`。
 - project ディレクトリの推定（CLI起動時）: `init` を呼んだファイル（`inspect` で呼び出し元）から親を辿り、
   `main.py` と `config.toml` が両方ある最初のディレクトリ。リポジトリ直下からの相対パスにする
   （リポジトリ直下 = `train_webui` パッケージの親）。
@@ -181,4 +232,12 @@ design.md §7〜9 のとおり。追加の取り決め：
 - API 呼び出しは `src/api.ts` に集約し、§2.2 の型を TypeScript で定義する。
 - backend が無くても開発・確認できるよう、`VITE_MOCK=1` で `src/api.ts` がモックデータを返すモードを持つ。
 - config エディタは textarea（等幅）で十分。TOML の検証は backend（400）に任せ、エラーを表示する。
+- 軸つきグラフは `src/components/PlotChart.tsx` に置き、Recharts の `ComposedChart` ＋ 数値の `XAxis`/`YAxis`
+  （`type="number"`、`scale="log"`/`"linear"`、lim は `domain`、未指定は `['auto','auto']`）で描く。
+  line は系列ごとに `Line`（`data` にその系列の点を送信順で渡す、`dot={false}`）、scatter は `Scatter`。
+  - ResultPanel で `kind === 'plot'` のラベルは PlotChart に比較対象run全部の Plot を渡して重ね描きする
+    （design.md §9 の色・凡例・定義の選び方・log軸の0以下の点の扱い）。
+  - 取得は run ごとに `GET /api/runs/{id}/plots`。2回目以降は `after_id=<前回のlast_point_id>` で差分を取り、
+    手元の点に追記する。比較対象runが変わったら取り直す。
+  - `VITE_MOCK=1` のモックモードにも Plot のモックデータ（line と scatter を1つずつ）を足す。
 - 見た目は簡素でよいが、左ツリー・タブ・状態表示が一目で分かること。
