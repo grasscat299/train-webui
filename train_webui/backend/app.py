@@ -1,0 +1,401 @@
+"""FastAPI アプリ本体（CONTRACT.md §2）。`create_app` がテスト・本番共通のエントリーポイント。"""
+from __future__ import annotations
+
+import base64
+import binascii
+import shutil
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Literal
+
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from . import discovery
+from .db import Database, now_iso
+from .ids import new_run_id
+from .jobs import JobBusyError, JobManager
+from .remote.types import RemoteControllerProtocol
+from .settings import Settings
+from .toml_utils import TomlValidationError, extract_group, set_wandb_group
+
+_FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+
+
+# ---------------------------------------------------------------------------
+# リクエストボディ（CONTRACT.md §2.2 / §2.3）
+
+class DraftRequest(BaseModel):
+    project: str
+    group: str
+    new_group: bool
+
+
+class ConfigRequest(BaseModel):
+    config_toml: str
+
+
+class InferRequest(BaseModel):
+    project: str
+    group: str
+
+
+class ClientRunCreate(BaseModel):
+    project: str
+    group: str
+    config_toml: str
+    hostname: str
+    pid: int
+
+
+class FinishRequest(BaseModel):
+    status: Literal["finished", "failed"]
+    error: str | None = None
+
+
+class ResultItem(BaseModel):
+    kind: Literal["metric", "image"]
+    label: str
+    step: int | None = None
+    value: float | None = None
+    image_b64: str | None = None
+    sent_at: str
+
+
+class ResultsRequest(BaseModel):
+    run_id: str
+    source: str
+    items: list[ResultItem]
+
+
+# ---------------------------------------------------------------------------
+# DB行 -> レスポンスJSON（CONTRACT.md §2.1）
+
+def _run_summary(row: dict) -> dict:
+    return {
+        "run_id": row["run_id"], "project": row["project"], "group": row["run_group"],
+        "origin": row["origin"], "status": row["status"],
+        "created_at": row["created_at"], "started_at": row["started_at"], "ended_at": row["ended_at"],
+    }
+
+
+def _job_public(row: dict) -> dict:
+    return {
+        "job_id": row["job_id"], "run_id": row["run_id"], "kind": row["kind"], "status": row["status"],
+        "started_at": row["started_at"], "ended_at": row["ended_at"],
+        "exit_code": row["exit_code"], "error": row["error"],
+    }
+
+
+def _run_detail(db: Database, row: dict) -> dict:
+    detail = _run_summary(row)
+    detail.update({
+        "config_toml": row["config_toml"], "git_commit": row["git_commit"], "git_diff": row["git_diff"],
+        "git_untracked": row["git_untracked"], "git_info_source": row["git_info_source"],
+        "hostname": row["hostname"], "pid": row["pid"], "last_heartbeat_at": row["last_heartbeat_at"],
+        "exit_code": row["exit_code"], "error": row["error"],
+        "jobs": [_job_public(j) for j in db.list_jobs_for_run(row["run_id"])],
+    })
+    return detail
+
+
+def _result_public(row: dict) -> dict:
+    base = {
+        "id": row["id"], "run_id": row["run_id"], "kind": row["kind"], "label": row["label"],
+        "step": row["step"], "source": row["source"], "sent_at": row["sent_at"],
+    }
+    if row["kind"] == "image":
+        base["image_url"] = f"/media/{row['image_path']}"
+    else:
+        base["value"] = row["value"]
+    return base
+
+
+# ---------------------------------------------------------------------------
+# draft の初期config（design.md §3）
+
+def _read_repo_config(settings: Settings, project: str) -> str:
+    project_dir = settings.repo_root / project
+    for name in ("config.toml", "config.example.toml"):
+        path = project_dir / name
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+    raise HTTPException(400, f"{project} に config.toml / config.example.toml がありません")
+
+
+def _build_draft_config(db: Database, settings: Settings, project: str, group: str, new_group: bool) -> str:
+    runs = db.list_runs_by_project(project)  # created_at 降順
+    if not new_group:
+        for r in runs:
+            if r["run_group"] == group:
+                return r["config_toml"]
+    else:
+        for r in runs:
+            if r["status"] != "draft":
+                return set_wandb_group(r["config_toml"], group)
+    base = _read_repo_config(settings, project)
+    if new_group:
+        base = set_wandb_group(base, group)
+    return base
+
+
+def create_app(
+    settings: Settings,
+    remote: RemoteControllerProtocol | None = None,
+    start_background: bool = True,
+) -> FastAPI:
+    if remote is None:
+        from .remote import RemoteController  # 遅延import（担当Cの実体。テストでは差し替える）
+
+        remote = RemoteController(settings)
+
+    settings.server.media_dir.mkdir(parents=True, exist_ok=True)
+    db = Database(settings.server.db_path)
+    db.init_schema()
+    job_manager = JobManager(settings, db, remote)
+    if start_background:
+        job_manager.start_background()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        job_manager.shutdown()
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.settings = settings
+    app.state.db = db
+    app.state.job_manager = job_manager
+
+    # ---- frontend 向け（CONTRACT.md §2.2） ---------------------------
+
+    @app.get("/api/tree")
+    def get_tree() -> list[dict]:
+        return _build_tree(db, settings)
+
+    @app.post("/api/rescan")
+    def rescan() -> list[dict]:
+        return _build_tree(db, settings)
+
+    @app.get("/api/state")
+    def get_state() -> dict:
+        busy, active = job_manager.get_busy_state()
+        return {"busy": busy, "active": active}
+
+    @app.post("/api/runs/draft")
+    def create_draft(body: DraftRequest) -> dict:
+        projects = discovery.discover_projects(settings.repo_root)
+        if body.project not in projects:
+            raise HTTPException(404, "project が見つかりません")
+        try:
+            config_toml = _build_draft_config(db, settings, body.project, body.group, body.new_group)
+        except TomlValidationError as e:
+            raise HTTPException(400, str(e)) from e
+        run_id = new_run_id(exists=lambda r: r in db.list_run_ids())
+        now = now_iso()
+        db.create_run(
+            run_id=run_id, project=body.project, run_group=body.group, origin="webui", status="draft",
+            config_toml=config_toml, git_commit=None, git_diff=None, git_untracked=None,
+            git_info_source=None, created_at=now, started_at=None, ended_at=None,
+            last_heartbeat_at=None, hostname=None, pid=None, exit_code=None, error=None,
+        )
+        return _run_detail(db, db.get_run(run_id))
+
+    @app.get("/api/runs/resolve")
+    def resolve_run(project: str, group: str) -> dict:
+        run = db.find_latest_train_run(project, group)
+        if run is None:
+            raise HTTPException(404, "対象のrunが見つかりません")
+        return {"run_id": run["run_id"]}
+
+    @app.get("/api/runs/{run_id}")
+    def get_run(run_id: str) -> dict:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        return _run_detail(db, run)
+
+    @app.put("/api/runs/{run_id}/config")
+    def update_config(run_id: str, body: ConfigRequest) -> dict:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        if run["status"] != "draft":
+            raise HTTPException(409, "draft以外のrunのconfigは編集できません")
+        try:
+            group = extract_group(body.config_toml)
+        except TomlValidationError as e:
+            raise HTTPException(400, str(e)) from e
+        db.update_run(run_id, config_toml=body.config_toml, run_group=group)
+        return _run_detail(db, db.get_run(run_id))
+
+    @app.post("/api/runs/{run_id}/start")
+    async def start_run(run_id: str) -> dict:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        if run["status"] != "draft":
+            raise HTTPException(409, "draftではないrunは開始できません")
+        busy, _active = job_manager.get_busy_state()
+        if busy:
+            raise HTTPException(409, "GPUを使用中の別のジョブがあります")
+        try:
+            await run_in_threadpool(job_manager.start_train, run_id)
+        except JobBusyError as e:
+            raise HTTPException(409, str(e)) from e
+        return _run_detail(db, db.get_run(run_id))
+
+    @app.post("/api/runs/{run_id}/stop")
+    async def stop_run(run_id: str) -> dict:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        try:
+            await run_in_threadpool(job_manager.stop_job, run_id)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+        return _run_detail(db, db.get_run(run_id))
+
+    @app.delete("/api/runs/{run_id}", status_code=204)
+    def delete_run(run_id: str) -> Response:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        if run["status"] == "running":
+            raise HTTPException(409, "runningのrunは削除できません")
+        for job in db.list_jobs_for_run(run_id):
+            (settings.server.media_dir / "logs" / f"{job['job_id']}.log").unlink(missing_ok=True)
+        image_dir = settings.server.media_dir / "images" / run_id
+        if image_dir.exists():
+            shutil.rmtree(image_dir)
+        db.delete_run(run_id)
+        return Response(status_code=204)
+
+    @app.post("/api/groups/infer")
+    async def start_infer(body: InferRequest) -> dict:
+        target = db.find_latest_train_run(body.project, body.group)
+        if target is None:
+            raise HTTPException(404, "対象のrunが見つかりません")
+        busy, _active = job_manager.get_busy_state()
+        if busy:
+            raise HTTPException(409, "GPUを使用中の別のジョブがあります")
+        try:
+            job = await run_in_threadpool(job_manager.start_infer, target["run_id"], body.project)
+        except JobBusyError as e:
+            raise HTTPException(409, str(e)) from e
+        return _job_public(job)
+
+    @app.get("/api/jobs/{job_id}/log")
+    def get_job_log(job_id: str, offset: int = 0) -> dict:
+        job = db.get_job(job_id)
+        if job is None:
+            raise HTTPException(404, "job が見つかりません")
+        text, new_offset = job_manager.read_local_log(job_id, offset)
+        return {"data": text, "offset": new_offset, "done": job["status"] != "running"}
+
+    @app.get("/api/runs/{run_id}/results")
+    def get_results(run_id: str, kind: str | None = None, label: str | None = None) -> list[dict]:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        return [_result_public(r) for r in db.list_results(run_id, kind=kind, label=label)]
+
+    @app.get("/api/labels")
+    def get_labels(run_ids: str = "") -> list[dict]:
+        ids = [r for r in run_ids.split(",") if r]
+        return db.list_labels(ids)
+
+    # ---- client 向け（CONTRACT.md §2.3） ------------------------------
+
+    @app.post("/api/runs")
+    def client_create_run(body: ClientRunCreate) -> dict:
+        busy, _active = job_manager.get_busy_state()
+        warning = "GPUを使用中の別のジョブがある状態で起動されました" if busy else None
+        run_id = new_run_id(exists=lambda r: r in db.list_run_ids())
+        last_sync = db.get_last_sync()
+        now = now_iso()
+        db.create_run(
+            run_id=run_id, project=body.project, run_group=body.group, origin="cli", status="running",
+            config_toml=body.config_toml,
+            git_commit=last_sync["git_commit"] if last_sync else None,
+            git_diff=last_sync["git_diff"] if last_sync else None,
+            git_untracked=last_sync["git_untracked"] if last_sync else None,
+            git_info_source="last_sync" if last_sync else None,
+            created_at=now, started_at=now, ended_at=None, last_heartbeat_at=now,
+            hostname=body.hostname, pid=body.pid, exit_code=None, error=None,
+        )
+        return {"run_id": run_id, "warning": warning}
+
+    @app.post("/api/runs/{run_id}/heartbeat", status_code=204)
+    def heartbeat(run_id: str) -> Response:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        if run["origin"] == "cli":
+            fields: dict = {"last_heartbeat_at": now_iso()}
+            if run["status"] == "lost":
+                fields["status"] = "running"
+            db.update_run(run_id, **fields)
+        return Response(status_code=204)
+
+    @app.post("/api/runs/{run_id}/finish", status_code=204)
+    def finish_run(run_id: str, body: FinishRequest) -> Response:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        if run["origin"] == "cli":
+            db.update_run(run_id, status=body.status, ended_at=now_iso(), error=body.error)
+        elif body.error is not None:
+            db.update_run(run_id, error=body.error)
+        return Response(status_code=204)
+
+    @app.post("/api/results", status_code=204)
+    def post_results(body: ResultsRequest) -> Response:
+        run = db.get_run(body.run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        for item in body.items:
+            if item.kind == "metric":
+                db.create_result(
+                    run_id=body.run_id, kind="metric", label=item.label, step=item.step,
+                    value=item.value, image_path=None, source=body.source, sent_at=item.sent_at,
+                )
+                continue
+            if not item.image_b64:
+                raise HTTPException(400, "image_b64 がありません")
+            try:
+                image_bytes = base64.b64decode(item.image_b64, validate=True)
+            except binascii.Error as e:
+                raise HTTPException(400, f"image_b64 のデコードに失敗しました: {e}") from e
+            result_id = db.create_result(
+                run_id=body.run_id, kind="image", label=item.label, step=item.step,
+                value=None, image_path=None, source=body.source, sent_at=item.sent_at,
+            )
+            rel_path = f"images/{body.run_id}/{result_id}.png"
+            abs_path = settings.server.media_dir / rel_path
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            abs_path.write_bytes(image_bytes)
+            db.update_result(result_id, image_path=rel_path)
+        return Response(status_code=204)
+
+    # ---- 静的配信 --------------------------------------------------------
+
+    app.mount("/media", StaticFiles(directory=str(settings.server.media_dir)), name="media")
+    if _FRONTEND_DIST.is_dir():
+        app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="frontend")
+
+    return app
+
+
+def _build_tree(db: Database, settings: Settings) -> list[dict]:
+    projects = discovery.discover_projects(settings.repo_root)
+    tree = []
+    for project in projects:
+        runs = db.list_runs_by_project(project)  # created_at 降順
+        groups: dict[str, list[dict]] = {}
+        for r in runs:
+            groups.setdefault(r["run_group"], []).append(_run_summary(r))
+        group_list = [{"group": g, "runs": groups[g]} for g in sorted(groups)]
+        tree.append({"project": project, "groups": group_list})
+    return tree
