@@ -127,17 +127,20 @@ poll_interval_sec = 1.5        # run.log の SSH pull 間隔 / プロセス生�
 - **起動手順**: コードをrsync（§4.5）→ SSHで `config.toml` を書き込み → 次を実行：
 
   ```sh
-  cd <repo_dir> && mkdir -p <job_dir> && \
-  setsid nohup sh -c '
-    env PYTHONUNBUFFERED=1 TRAIN_WEBUI_URL=<public_url> TRAIN_WEBUI_RUN_ID=<run_id> \
-        TRAIN_WEBUI_PROJECT=<project_dir> TRAIN_WEBUI_SOURCE=<train|infer> \
-      singularity exec <singularity_args> <sif_path> <python> -m <module.path>.main --mode <mode>
-    echo $? > <job_dir>/run.exit
-  ' > <job_dir>/run.log 2>&1 < /dev/null &
-  echo $! > <job_dir>/run.pid
+  cd <repo_dir> && mkdir -p <job_dir> && (
+    setsid nohup sh -c '
+      env PYTHONUNBUFFERED=1 TRAIN_WEBUI_URL=<public_url> TRAIN_WEBUI_RUN_ID=<run_id> \
+          TRAIN_WEBUI_PROJECT=<project_dir> TRAIN_WEBUI_SOURCE=<train|infer> \
+        singularity exec <singularity_args> <sif_path> <python> -m <module.path>.main --mode <mode>
+      echo $? > <job_dir>/run.exit
+    ' > <job_dir>/run.log 2>&1 < /dev/null &
+    echo $! > <job_dir>/run.pid
+  ) && cat <job_dir>/run.pid
   ```
 
-  - `<job_dir>` = `<run_root>/<run_id>/<train|infer_<timestamp>>`
+  - 背景化する部分だけを括弧で囲む（`a && b && c &` と書くと `&` が連結全体にかかり、`mkdir` が
+    終わる前に `run.pid` を書こうとする競合が起きる）。
+  - `<job_dir>` = `<run_root>/<run_id>/<job_id>`（`job_id` の形式は CONTRACT.md §1）
   - `PYTHONUNBUFFERED=1` は必須（ログのリアルタイム性のため、下記コラム）。
   - `setsid` で新しいプロセスグループにする（停止時にグループごとkillするため）。
   - 環境変数は singularity にそのまま引き継がれる前提（`singularity_args` に `--cleanenv` を入れる

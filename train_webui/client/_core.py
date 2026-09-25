@@ -204,6 +204,12 @@ class _Client:
             return
         sent_at = _now_iso()
         for label, value in data.items():
+            # torch.Tensor等がそのままキューに入ると送信時のJSON化で同じバッチごと捨てられるため、ここで数値化する
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                _warn(f"数値に変換できない値のため破棄しました(label={label}, type={type(value).__name__})")
+                continue
             self._queue.put({
                 "kind": "metric", "label": label, "step": step,
                 "value": value, "sent_at": sent_at,

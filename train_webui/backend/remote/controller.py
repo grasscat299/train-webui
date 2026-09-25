@@ -133,9 +133,7 @@ class RemoteController:
             f"{shlex.quote(r.sif_path)} {shlex.quote(r.python)} -m {module}.main --mode {spec.kind}; "
             f"echo $? > {quoted_job_dir}/run.exit"
         )
-        # mkdir を先に同期実行してから、その結果を確認した上でバックグラウンド化する
-        # （`cmd1 && cmd2 &` のように連結全体を一括で背景化すると、mkdir未完了のうちに
-        #  run.pid 書き込みへ進んでしまう競合があったため、括弧で明示的にサブシェル化する）
+        # `a && b && c &` だと連結全体が背景化され mkdir 前に run.pid を書きうるので、背景化部分だけ括弧で囲む
         return (
             f"cd {shlex.quote(r.repo_dir)} && mkdir -p {quoted_job_dir} && "
             f"( setsid nohup sh -c {shlex.quote(inner)} > {quoted_job_dir}/run.log 2>&1 < /dev/null & "
