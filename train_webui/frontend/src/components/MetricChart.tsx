@@ -1,7 +1,7 @@
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { MetricResult } from '../api';
 
-const COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
+import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE } from './chartStyle';
 
 export interface MetricSeries {
   runId: string;
@@ -12,13 +12,13 @@ export interface MetricSeries {
 // 数値ラベル用の折れ線グラフ。x軸はstep。複数runを渡せば重ねて表示する（Resultタブ用）。
 export function MetricChart({ series }: { series: MetricSeries[] }) {
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <LineChart margin={{ top: 8, right: 24, bottom: 8, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="step" type="number" allowDuplicatedCategory={false} />
-        <YAxis />
-        <Tooltip />
-        <Legend />
+    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+      <LineChart margin={CHART_MARGIN}>
+        <CartesianGrid stroke="var(--grid)" vertical={false} />
+        <XAxis dataKey="step" type="number" allowDuplicatedCategory={false} tick={TICK} />
+        <YAxis tick={TICK} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} />
+        <Legend wrapperStyle={LEGEND_STYLE} iconSize={8} />
         {series.map((s, i) => (
           <Line
             key={s.runId}

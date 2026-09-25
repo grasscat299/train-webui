@@ -3,6 +3,8 @@ import { api } from '../api';
 import type { ImageResult, LabelInfo, MetricResult, Plot, ProjectNode, Result } from '../api';
 import { MetricChart } from './MetricChart';
 import { PlotChart, mergePlots } from './PlotChart';
+import { PanelSections } from './PanelSections';
+import type { PanelItem } from './PanelSections';
 
 interface RunMeta {
   project: string;
@@ -84,70 +86,82 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
     return <div className="panel-empty">左のツリーで比較対象のrunにチェックを入れてください。</div>;
   }
 
+  const runLabel = (id: string) => `${id} (${runMetaMap[id]?.group ?? '-'})`;
+  const panelItems: PanelItem[] = labels
+    .filter((l) => selectedLabels[l.label])
+    .map((l) => {
+      if (l.kind === 'plot') {
+        const entries = runIds.flatMap((id) => {
+          const plot = (plotsByRun[id] ?? []).find((p) => p.label === l.label);
+          return plot ? [{ runId: id, runLabel: runLabel(id), plot }] : [];
+        });
+        // 見出しの title は PlotChart と同じく updated_at が最新の定義のもの
+        const latest = entries.map((e) => e.plot).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        return { label: l.label, subtitle: latest?.title, content: <PlotChart entries={entries} /> };
+      }
+      if (l.kind === 'metric') {
+        return {
+          label: l.label,
+          content: (
+            <MetricChart
+              series={runIds.map((id) => ({
+                runId: id,
+                label: runLabel(id),
+                points: (resultsByRun[id] ?? []).filter(
+                  (r): r is MetricResult => r.kind === 'metric' && r.label === l.label,
+                ),
+              }))}
+            />
+          ),
+        };
+      }
+      return {
+        label: l.label,
+        wide: runIds.length > 1,
+        content: (
+          <div className="image-row">
+            {runIds.map((id) => {
+              const imgs = (resultsByRun[id] ?? []).filter(
+                (r): r is ImageResult => r.kind === 'image' && r.label === l.label,
+              );
+              const latest = imgs.slice().sort((a, b) => a.sent_at.localeCompare(b.sent_at)).at(-1);
+              return (
+                <div key={id} className="image-cell">
+                  <div className="image-cell-title">{runLabel(id)}</div>
+                  {latest ? (
+                    <a href={latest.image_url} target="_blank" rel="noreferrer" title="クリックで元の大きさで開く">
+                      <img src={latest.image_url} alt={l.label} />
+                    </a>
+                  ) : (
+                    <div className="no-image">画像なし</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ),
+      };
+    });
+
   return (
     <div className="result-panel">
       {error && <div className="error-banner">{error}</div>}
       <div className="label-checks">
-        {labels.map((l) => (
-          <label key={l.label} className="label-check">
-            <input
-              type="checkbox"
-              checked={selectedLabels[l.label] ?? true}
-              onChange={(e) => setSelectedLabels((prev) => ({ ...prev, [l.label]: e.target.checked }))}
-            />
-            {l.label} <span className="kind-badge">{l.kind}</span>
-          </label>
-        ))}
+        {labels.map((l) => {
+          const on = selectedLabels[l.label] ?? true;
+          return (
+            <button
+              key={l.label}
+              className={`label-chip${on ? ' on' : ''}`}
+              title={`${l.kind}（クリックで表示/非表示）`}
+              onClick={() => setSelectedLabels((prev) => ({ ...prev, [l.label]: !on }))}
+            >
+              {l.label}
+            </button>
+          );
+        })}
       </div>
-      {labels
-        .filter((l) => selectedLabels[l.label])
-        .map((l) => (
-          <section key={l.label} className="result-section">
-            <h3>{l.label}</h3>
-            {l.kind === 'plot' ? (
-              <PlotChart
-                label={l.label}
-                entries={runIds.flatMap((id) => {
-                  const plot = (plotsByRun[id] ?? []).find((p) => p.label === l.label);
-                  return plot ? [{ runId: id, runLabel: `${id} (${runMetaMap[id]?.group ?? '-'})`, plot }] : [];
-                })}
-              />
-            ) : l.kind === 'metric' ? (
-              <MetricChart
-                series={runIds.map((id) => ({
-                  runId: id,
-                  label: `${id} (${runMetaMap[id]?.group ?? '-'})`,
-                  points: (resultsByRun[id] ?? []).filter(
-                    (r): r is MetricResult => r.kind === 'metric' && r.label === l.label,
-                  ),
-                }))}
-              />
-            ) : (
-              <div className="image-row">
-                {runIds.map((id) => {
-                  const imgs = (resultsByRun[id] ?? []).filter(
-                    (r): r is ImageResult => r.kind === 'image' && r.label === l.label,
-                  );
-                  const latest = imgs.slice().sort((a, b) => a.sent_at.localeCompare(b.sent_at)).at(-1);
-                  return (
-                    <div key={id} className="image-cell">
-                      <div className="image-cell-title">
-                        {id} ({runMetaMap[id]?.group ?? '-'})
-                      </div>
-                      {latest ? (
-                        <a href={latest.image_url} target="_blank" rel="noreferrer" title="クリックで元の大きさで開く">
-                          <img src={latest.image_url} alt={l.label} />
-                        </a>
-                      ) : (
-                        <div className="no-image">画像なし</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        ))}
+      <PanelSections items={panelItems} />
     </div>
   );
 }

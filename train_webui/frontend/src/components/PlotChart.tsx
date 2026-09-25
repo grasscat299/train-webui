@@ -1,7 +1,7 @@
 import { CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from 'recharts';
 import type { Plot } from '../api';
 
-const COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
+import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE } from './chartStyle';
 
 export interface PlotEntry {
   runId: string;
@@ -32,7 +32,8 @@ function defKey(p: Plot): string {
 }
 
 // 軸つきグラフ（design.md §5.3, §9）。比較対象runの同じラベルの全系列を1つの軸に重ねる。
-export function PlotChart({ label, entries }: { label: string; entries: PlotEntry[] }) {
+// 見出し（ラベル・title）はパネル側（PanelSections）で出すので、ここでは注記とグラフだけ描く。
+export function PlotChart({ entries }: { entries: PlotEntry[] }) {
   if (entries.length === 0) return <div className="no-image">データなし</div>;
 
   // 軸の定義は updated_at が最新のものを使う
@@ -61,23 +62,25 @@ export function PlotChart({ label, entries }: { label: string; entries: PlotEntr
 
   return (
     <div className="plot-chart">
-      <div className="plot-chart-head">
-        <span className="plot-chart-title">{def.title ?? label}</span>
-        {defsDiffer && <span className="plot-chart-note">runによって軸の定義が異なります</span>}
-        {notes.map((n) => (
-          <span key={n} className="plot-chart-note">{n}</span>
-        ))}
-      </div>
-      <ResponsiveContainer width="100%" height={280}>
-        <ComposedChart margin={{ top: 8, right: 24, bottom: 20, left: 8 }}>
-          <CartesianGrid strokeDasharray="3 3" />
+      {(defsDiffer || notes.length > 0) && (
+        <div className="plot-chart-head">
+          {defsDiffer && <span className="plot-chart-note">runによって軸の定義が異なります</span>}
+          {notes.map((n) => (
+            <span key={n} className="plot-chart-note">{n}</span>
+          ))}
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+        <ComposedChart margin={CHART_MARGIN}>
+          <CartesianGrid stroke="var(--grid)" vertical={false} />
           <XAxis
             dataKey="x"
             type="number"
             scale={scaleOf(def.xscale)}
             domain={domainOf(def.xlim)}
             allowDataOverflow={def.xlim !== null}
-            label={def.xlabel ? { value: def.xlabel, position: 'insideBottom', offset: -10 } : undefined}
+            tick={TICK}
+            label={def.xlabel ? { value: def.xlabel, position: 'insideBottom', offset: -4, style: TICK } : undefined}
           />
           <YAxis
             dataKey="y"
@@ -85,10 +88,11 @@ export function PlotChart({ label, entries }: { label: string; entries: PlotEntr
             scale={scaleOf(def.yscale)}
             domain={domainOf(def.ylim)}
             allowDataOverflow={def.ylim !== null}
-            label={def.ylabel ? { value: def.ylabel, angle: -90, position: 'insideLeft' } : undefined}
+            tick={TICK}
+            label={def.ylabel ? { value: def.ylabel, angle: -90, position: 'insideLeft', style: TICK } : undefined}
           />
-          <Tooltip />
-          <Legend verticalAlign="top" />
+          <Tooltip contentStyle={TOOLTIP_STYLE} />
+          <Legend wrapperStyle={LEGEND_STYLE} iconSize={8} />
           {lines.map((l, i) =>
             def.kind === 'line' ? (
               <Line

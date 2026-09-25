@@ -1,14 +1,5 @@
 import { useState } from 'react';
-import type { GroupNode, ProjectNode, RunSummary, RunStatus } from '../api';
-
-const STATUS_ICON: Record<RunStatus, string> = {
-  draft: '📝',
-  running: '▶️',
-  finished: '✅',
-  failed: '❌',
-  stopped: '⏹️',
-  lost: '❓',
-};
+import type { GroupNode, ProjectNode, RunSummary } from '../api';
 
 export interface TreeProps {
   tree: ProjectNode[];
@@ -128,7 +119,7 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
                 <input type="checkbox" checked={isRunChecked(r.run_id)} onChange={(e) => toggleRun(r.run_id, e.target.checked)} />
               )}
               <button className="tree-run-btn" onClick={() => onSelectRun(r.run_id)}>
-                <span className="status-icon">{STATUS_ICON[r.status]}</span>
+                <span className={`status-dot status-${r.status}`} title={r.status} />
                 <span className="run-id">{r.run_id}</span>
                 {r.origin === 'cli' && <span className="cli-badge">CLI</span>}
               </button>

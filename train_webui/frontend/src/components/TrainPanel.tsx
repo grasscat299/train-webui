@@ -5,6 +5,8 @@ import { LogView } from './LogView';
 import { MetricChart } from './MetricChart';
 import { ImageViewer } from './ImageViewer';
 import { PlotChart, mergePlots } from './PlotChart';
+import { PanelSections } from './PanelSections';
+import type { PanelItem } from './PanelSections';
 
 interface Props {
   runId: string | null;
@@ -146,12 +148,64 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
     }
   };
 
+  const panelItems: PanelItem[] = [
+    ...plots.map((p) => ({
+      label: p.label,
+      subtitle: p.title,
+      content: <PlotChart entries={[{ runId: run.run_id, runLabel: run.run_id, plot: p }]} />,
+    })),
+    ...metricLabels.map((label) => ({
+      label,
+      content: (
+        <MetricChart
+          series={[{ runId: run.run_id, points: results.filter((r): r is MetricResult => r.kind === 'metric' && r.label === label) }]}
+        />
+      ),
+    })),
+    ...imageLabels.map((label) => ({
+      label,
+      content: <ImageViewer images={results.filter((r): r is ImageResult => r.kind === 'image' && r.label === label)} />,
+    })),
+  ];
+  const canDelete = run.status !== 'running';
+  const canStopTrain = run.status === 'running' && run.origin === 'webui';
+
   return (
     <div className="train-detail">
-      <div className="train-detail-header">
-        <h2>{run.run_id}</h2>
-        <div className="meta">
-          {run.project} / {run.group} ・ status: {run.status} {run.origin === 'cli' && <span className="cli-badge">CLI</span>}
+      <div className="run-header">
+        <div>
+          <div className="run-title">
+            <h2>{run.run_id}</h2>
+            <span className={`status-pill status-${run.status}`}>{run.status}</span>
+            {run.origin === 'cli' && <span className="cli-badge">CLI</span>}
+          </div>
+          <div className="meta">
+            {run.project} / {run.group}
+            {run.started_at && <> ・ 開始 {run.started_at}</>}
+            {run.ended_at && <> ・ 終了 {run.ended_at}</>}
+          </div>
+        </div>
+        <div className="actions">
+          {run.status === 'draft' && (
+            <>
+              <button onClick={handleSaveConfig} disabled={saving}>
+                保存
+              </button>
+              <button className="primary" onClick={handleStart} disabled={saving || busy}>
+                学習開始
+              </button>
+            </>
+          )}
+          {canStopTrain && (
+            <button onClick={handleStop} disabled={saving} className="danger">
+              中止
+            </button>
+          )}
+          {canDelete && (
+            <button onClick={handleDelete} disabled={saving} className="danger">
+              削除
+            </button>
+          )}
         </div>
       </div>
 
@@ -161,11 +215,17 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
       {run.status === 'lost' && (
         <div className="warn-banner">終了を報告できずに止まった可能性があります（heartbeat途絶、最終: {run.last_heartbeat_at ?? '-'}）。</div>
       )}
+      {run.status === 'running' && run.origin === 'cli' && (
+        <div className="note">
+          CLIから起動されたrunのため、WebUIからの中止・ログ表示はできません（最終heartbeat: {run.last_heartbeat_at ?? '-'}）。
+        </div>
+      )}
       {run.origin === 'cli' && run.git_info_source === 'last_sync' && (
         <div className="note">
           ※ このrunのコード情報は最後にWebUIが同期した時点のものです（学習用PC上で直接編集されていた場合は実際のコードとずれる可能性があります）。
         </div>
       )}
+      {configError && <div className="error-banner">{configError}</div>}
 
       {activeInferJob && (
         <div className="infer-banner">
@@ -177,136 +237,48 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
         </div>
       )}
 
-      {run.status === 'draft' && (
-        <div className="config-block">
-          <h3>config（編集可）</h3>
-          <textarea className="config-editor" value={configDraft} onChange={(e) => setConfigDraft(e.target.value)} rows={18} spellCheck={false} />
-          {configError && <div className="error-banner">{configError}</div>}
-          <div className="actions">
-            <button onClick={handleSaveConfig} disabled={saving}>
-              保存
-            </button>
-            <button onClick={handleStart} disabled={saving || busy}>
-              学習開始
-            </button>
-            <button onClick={handleDelete} disabled={saving} className="danger">
-              削除
-            </button>
-          </div>
+      {run.status === 'draft' ? (
+        <div className="block">
+          <div className="block-title">config</div>
+          <textarea className="config-editor" value={configDraft} onChange={(e) => setConfigDraft(e.target.value)} rows={22} spellCheck={false} />
           {busy && <div className="note">他のジョブが実行中のため学習を開始できません。</div>}
         </div>
-      )}
-
-      {run.status === 'running' && (
+      ) : (
         <>
-          <div className="config-block">
-            <h3>config（読み取り専用）</h3>
-            <textarea className="config-editor" value={run.config_toml} readOnly rows={12} />
-          </div>
-          {run.origin === 'webui' ? (
-            <>
-              <div className="actions">
-                <button onClick={handleStop} disabled={saving} className="danger">
-                  中止
-                </button>
-              </div>
-              {mainTrainJob && (
-                <div className="log-block">
-                  <h3>ログ</h3>
-                  <LogView key={mainTrainJob.job_id} jobId={mainTrainJob.job_id} />
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="note">
-              CLIから起動されたrunのため、WebUIからの中止・ログ表示はできません（最終heartbeat: {run.last_heartbeat_at ?? '-'}）。
-            </div>
-          )}
-        </>
-      )}
+          <PanelSections items={panelItems} />
 
-      {(run.status === 'finished' || run.status === 'failed' || run.status === 'stopped') && (
-        <>
-          <div className="config-block">
-            <h3>config（読み取り専用）</h3>
-            <textarea className="config-editor" value={run.config_toml} readOnly rows={12} />
-          </div>
-          {mainTrainJob && (
-            <details className="log-block" open={run.status === 'failed'}>
-              <summary>学習ログ全文</summary>
+          {mainTrainJob && run.origin === 'webui' && (
+            <details className="block" open={run.status === 'running' || run.status === 'failed'}>
+              <summary className="block-title">ログ</summary>
               <LogView key={mainTrainJob.job_id} jobId={mainTrainJob.job_id} />
             </details>
           )}
-          <div className="actions">
-            <button onClick={handleDelete} disabled={saving} className="danger">
-              削除
-            </button>
-          </div>
+
+          <details className="block">
+            <summary className="block-title">config</summary>
+            <textarea className="config-editor" value={run.config_toml} readOnly rows={14} />
+          </details>
+
+          {inferJobs.length > 0 && (
+            <details className="block">
+              <summary className="block-title">inferジョブ履歴（{inferJobs.length}）</summary>
+              <ul className="infer-history">
+                {inferJobs
+                  .slice()
+                  .reverse()
+                  .map((job) => (
+                    <li key={job.job_id}>
+                      <button className="infer-history-toggle" onClick={() => setExpandedInferJobs((prev) => ({ ...prev, [job.job_id]: !prev[job.job_id] }))}>
+                        {expandedInferJobs[job.job_id] ? '▾' : '▸'} {job.job_id} - {job.status}（{job.started_at} 〜 {job.ended_at ?? '実行中'}）
+                        {job.status === 'failed' && <span className="error-badge">失敗</span>}
+                      </button>
+                      {expandedInferJobs[job.job_id] && <LogView jobId={job.job_id} />}
+                    </li>
+                  ))}
+              </ul>
+            </details>
+          )}
         </>
-      )}
-
-      {run.status === 'lost' && (
-        <div className="config-block">
-          <h3>config（読み取り専用）</h3>
-          <textarea className="config-editor" value={run.config_toml} readOnly rows={12} />
-          <div className="actions">
-            <button onClick={handleDelete} disabled={saving} className="danger">
-              削除
-            </button>
-          </div>
-        </div>
-      )}
-
-      {inferJobs.length > 0 && (
-        <div className="infer-history">
-          <h3>inferジョブ履歴</h3>
-          <ul>
-            {inferJobs
-              .slice()
-              .reverse()
-              .map((job) => (
-                <li key={job.job_id}>
-                  <button className="infer-history-toggle" onClick={() => setExpandedInferJobs((prev) => ({ ...prev, [job.job_id]: !prev[job.job_id] }))}>
-                    {expandedInferJobs[job.job_id] ? '▼' : '▶'} {job.job_id} - {job.status}（{job.started_at} 〜 {job.ended_at ?? '実行中'}）
-                    {job.status === 'failed' && <span className="error-badge">失敗</span>}
-                  </button>
-                  {expandedInferJobs[job.job_id] && <LogView jobId={job.job_id} />}
-                </li>
-              ))}
-          </ul>
-        </div>
-      )}
-
-      {(metricLabels.length > 0 || plots.length > 0) && (
-        <div className="charts">
-          <h3>グラフ</h3>
-          {plots.map((p) => (
-            <div key={p.label} className="chart-block">
-              <h4>{p.label}</h4>
-              <PlotChart label={p.label} entries={[{ runId: run.run_id, runLabel: run.run_id, plot: p }]} />
-            </div>
-          ))}
-          {metricLabels.map((label) => (
-            <div key={label} className="chart-block">
-              <h4>{label}</h4>
-              <MetricChart
-                series={[{ runId: run.run_id, points: results.filter((r): r is MetricResult => r.kind === 'metric' && r.label === label) }]}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {imageLabels.length > 0 && (
-        <div className="images">
-          <h3>画像</h3>
-          {imageLabels.map((label) => (
-            <div key={label} className="image-block">
-              <h4>{label}</h4>
-              <ImageViewer images={results.filter((r): r is ImageResult => r.kind === 'image' && r.label === label)} />
-            </div>
-          ))}
-        </div>
       )}
     </div>
   );
