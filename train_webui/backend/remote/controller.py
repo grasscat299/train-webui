@@ -126,11 +126,10 @@ class RemoteController:
             f"TRAIN_WEBUI_PROJECT={shlex.quote(spec.project_dir)}",
             f"TRAIN_WEBUI_SOURCE={shlex.quote(spec.kind)}",
         ]
-        sing_args = " ".join(shlex.quote(a) for a in r.singularity_args)
         quoted_job_dir = shlex.quote(job_dir)
+        # ssh先はsingularity instance内のsshdなので、コンテナで包まずそのままpythonを実行する
         inner = (
-            f"env {' '.join(env_parts)} singularity exec {sing_args} "
-            f"{shlex.quote(r.sif_path)} {shlex.quote(r.python)} -m {module}.main --mode {spec.kind}; "
+            f"env {' '.join(env_parts)} {shlex.quote(r.python)} -m {module}.main --mode {spec.kind}; "
             f"echo $? > {quoted_job_dir}/run.exit"
         )
         # `a && b && c &` だと連結全体が背景化され mkdir 前に run.pid を書きうるので、背景化部分だけ括弧で囲む

@@ -19,10 +19,8 @@ class RemoteSettings:
     port: int
     key_path: str
     repo_dir: str
-    sif_path: str
     python: str
     run_root: str
-    singularity_args: list[str]
     stop_timeout_sec: float
 
 

@@ -1,7 +1,6 @@
 """ssh を「ローカルで sh -c を実行する偽runner」に差し替えた結合テスト。
 
-singularity は無いため、design.md の起動コマンド構造はそのままに、singularity 部分だけ
-PATH経由のスタブスクリプトに差し替える（本番の組み立て結果自体は変えない）。
+settings.remote.python を、引数を無視して決まった動きをするスタブスクリプトに差し替える。
 外部ホストへの接続は一切行わない。
 """
 from __future__ import annotations
@@ -37,29 +36,18 @@ done
 class LocalShellRunner:
     """ssh呼び出しをローカルの sh -c 実行に差し替える偽 CommandRunner。"""
 
-    def __init__(self, extra_path: str) -> None:
-        self._extra_path = extra_path
-
     def run(self, args, *, input=None, timeout=None):
-        import os
         if args and args[0] == "ssh":
-            remote_command = args[-1]
-            env = dict(os.environ)
-            env["PATH"] = f"{self._extra_path}:{env.get('PATH', '')}"
-            return subprocess.run(
-                ["sh", "-c", remote_command], input=input, capture_output=True,
-                timeout=timeout, env=env,
-            )
+            return subprocess.run(["sh", "-c", args[-1]], input=input, capture_output=True, timeout=timeout)
         return subprocess.run(args, input=input, capture_output=True, timeout=timeout)
 
 
-def _write_singularity_stub(tmp_path: Path, script_body: str) -> str:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    stub = bin_dir / "singularity"
+def _write_python_stub(tmp_path: Path, script_body: str) -> str:
+    stub = tmp_path / "bin" / "fake-python"
+    stub.parent.mkdir(exist_ok=True)
     stub.write_text(script_body)
     stub.chmod(0o755)
-    return str(bin_dir)
+    return str(stub)
 
 
 def _prepare(settings_factory, tmp_path, script_body, stop_timeout_sec: float = 10.0):
@@ -67,19 +55,16 @@ def _prepare(settings_factory, tmp_path, script_body, stop_timeout_sec: float = 
     repo_dir.mkdir()
     (repo_dir / "proj").mkdir()
     run_root = tmp_path / "runs"
-    stub_dir = _write_singularity_stub(tmp_path, script_body)
 
     settings = settings_factory(stop_timeout_sec=stop_timeout_sec)
     remote = replace(
         settings.remote,
         repo_dir=str(repo_dir),
         run_root=str(run_root),
-        sif_path="unused.sif",
-        python="unused-python",
-        singularity_args=[],
+        python=_write_python_stub(tmp_path, script_body),
     )
     settings = replace(settings, remote=remote)
-    controller = RemoteController(settings, runner=LocalShellRunner(stub_dir))
+    controller = RemoteController(settings, runner=LocalShellRunner())
     return controller, repo_dir, run_root
 
 

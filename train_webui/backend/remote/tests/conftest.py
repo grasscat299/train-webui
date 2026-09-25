@@ -16,10 +16,8 @@ def make_settings(repo_root: Path, **overrides) -> Settings:
         port=22,
         key_path="~/.ssh/id_ed25519",
         repo_dir="/home/user/td_plan",
-        sif_path="/path/to/image.sif",
-        python="venv/bin/python",
+        python="python3",
         run_root="/home/user/train_webui_runs",
-        singularity_args=["--nv"],
         stop_timeout_sec=overrides.pop("stop_timeout_sec", 10.0),
     )
     server = ServerSettings(

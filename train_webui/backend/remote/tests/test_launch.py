@@ -53,8 +53,8 @@ def test_launch_sends_config_then_launch_command(settings_factory):
     assert "TRAIN_WEBUI_PROJECT=" in launch_cmd
     assert "TRAIN_WEBUI_SOURCE=" in launch_cmd
     assert "TRAIN_WEBUI_URL=" in launch_cmd
-    assert "singularity exec" in launch_cmd
-    assert "-m src.world_model_v1.main --mode train" in launch_cmd
+    assert "singularity" not in launch_cmd
+    assert "python3 -m src.world_model_v1.main --mode train" in launch_cmd
     assert "run.pid" in launch_cmd
     assert "cat " in launch_cmd
 
@@ -66,16 +66,14 @@ def test_launch_sends_config_then_launch_command(settings_factory):
 def test_launch_quotes_paths_with_special_characters(settings_factory):
     runner = FakeRunner(responses=[ok(), ok(stdout=b"999\n")])
     settings = settings_factory()
-    # repo_dir/sif_path/singularity_args にスペースやシングルクォートを含めて壊れないことを確認する
+    # repo_dir/python/run_root にスペースやシングルクォートを含めて壊れないことを確認する
     from ...settings import RemoteSettings
     tricky_remote = RemoteSettings(
         host=settings.remote.host, user=settings.remote.user, port=settings.remote.port,
         key_path=settings.remote.key_path,
         repo_dir="/home/g rass/auto ark's repo",
-        sif_path="/path/with space/it's.sif",
-        python="venv/bin/python",
+        python="/opt/py thon/it's/python3",
         run_root="/home/g rass/run root",
-        singularity_args=["--nv", "--bind", "/data with space:/data"],
         stop_timeout_sec=settings.remote.stop_timeout_sec,
     )
     from dataclasses import replace

@@ -20,14 +20,14 @@
 ## 1. 全体構成
 
 ```
-[ローカルPC (WSL2)]                    [学習用PC]
- WebUI backend      --rsync/ssh-->      リポジトリ(コード同期先)
-   - project検出                        singularity image
+[ローカルPC (WSL2)]                    [学習用PC の singularity instance（--nv）]
+ WebUI backend      --rsync/ssh-->      sshd（一般ユーザー, 2222番）  ※§1.6
+   - project検出      (tailscale)       リポジトリ(コード同期先)
    - config編集・run管理
    - ジョブ起動/停止/終了検知(ssh)
    - run.logのtail(ssh pull)  --ssh-->  run.log
    - /api/results (受信)   <--http--    main.py / CLIスクリプト
-                                        (clientでメトリクス・画像をpush)
+                        (tailscale)     (clientでメトリクス・画像をpush)
  WebUI frontend (React)
    - project/group/runツリー
    - Train / Result タブ
@@ -55,16 +55,14 @@
 - SSHは公開鍵認証が設定済みの前提。パスワード等の秘密情報はこのファイルに書かない（鍵パスのみ）。
 
 ```toml
-[remote]                       # 学習用PC
-host      = "gpu-host.example" # ~/.ssh/config の Host エイリアスでも可
-user      = "user"
-port      = 22
+[remote]                       # 学習用PCの singularity instance 内の sshd（§1.6）
+host      = "100.x.x.x"        # instance の tailscale の IP
+user      = "student"
+port      = 2222
 key_path  = "~/.ssh/id_ed25519"
-repo_dir  = "/home/user/td_plan"          # 学習用PC上のリポジトリの場所
-sif_path  = "/path/to/image.sif"               # singularity image
-python    = "venv/bin/python"                  # repo_dir からの相対パス
+repo_dir  = "/home/user/td_plan"          # 以下のパスはコンテナの中から見たパス
+python    = "python3"                         # コンテナ内のpython
 run_root  = "/home/user/train_webui_runs"  # run.log / run.pid / run.exit を置く場所（repo_dirの外）
-singularity_args = ["--nv"]                    # GPU利用など、singularity exec に渡す追加引数
 
 [server]                       # ローカルPCのWebUI server
 host        = "0.0.0.0"        # listenアドレス
@@ -76,6 +74,31 @@ media_dir   = "train_webui/data/media"   # 受信した画像・終了後のrun.
 [log]
 poll_interval_sec = 1.5        # run.log の SSH pull 間隔 / プロセス生存確認の間隔
 ```
+
+## 1.6 学習用PC側の構成（singularity instance 内で完結させる）
+
+学習用PC本体（コンテナの外）の環境は一切変更しない。sshd・tailscale・rsync・python などはすべて
+singularity の sandbox（書き込み可能なディレクトリ形式のイメージ）に入れ、instance として起動する。
+WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマンドは singularity で包まず、
+コンテナ内の `python3` を直接実行する（§4）。
+
+- **起動**: `singularity instance start --nv --containall --bind <学習用PCの作業dir>:/home/user <sandbox> train_webui`。
+  sandbox の `/.singularity.d/startscript` で tailscaled と sshd を自動起動する（`shell`/`exec` では
+  startscript は動かないので必ず instance で起動する）。
+- **sshd**: 一般ユーザー権限で `Port 2222` / `ListenAddress 127.0.0.1`。設定・ホスト鍵・authorized_keys は
+  sandbox 内の `/opt/sshd/` に置く。`SetEnv` で次を渡す：
+  - `LD_LIBRARY_PATH=/.singularity.d/libs`（`--nv` のGPUライブラリ。ssh ログインには引き継がれないため）
+  - `http_proxy=http://localhost:1055`（clientの送信を tailscale 経由にするため。下記）
+  - `TMPDIR=/home/user/tmp`（`--containall` 時の `/tmp` は 16MB の tmpfs しかないため）
+- **tailscale**: root も TUN も使わない userspace モード（`tailscaled --tun=userspace-networking`）。状態ファイル
+  とソケットは `/home/user/.ts-train/` に置き、instance を起動し直しても再ログイン不要にする。
+  - 外から来た接続（WSL → instance の tailscale IP:2222）は localhost に転送されるので、sshd は
+    localhost だけで待ち受けてよい（学習用PCのLAN側には開かない）。
+  - 外へ出る接続（client → WSL の WebUI server）はそのままでは tailnet に届かないので、tailscaled の
+    HTTP proxy（`--outbound-http-proxy-listen=localhost:1055`）を経由させる。client は `urllib` なので
+    `http_proxy` 環境変数だけで経由できる。
+- instance は明示的に止めるか学習用PCが再起動するまで動き続ける。止まった場合は実行中のジョブも
+  止まる（WebUI上は `run.exit` が無いので failed になる）。
 
 ## 2. プロジェクト検出
 
@@ -134,7 +157,7 @@ poll_interval_sec = 1.5        # run.log の SSH pull 間隔 / プロセス生�
     setsid nohup sh -c '
       env PYTHONUNBUFFERED=1 TRAIN_WEBUI_URL=<public_url> TRAIN_WEBUI_RUN_ID=<run_id> \
           TRAIN_WEBUI_PROJECT=<project_dir> TRAIN_WEBUI_SOURCE=<train|infer> \
-        singularity exec <singularity_args> <sif_path> <python> -m <module.path>.main --mode <mode>
+        <python> -m <module.path>.main --mode <mode>
       echo $? > <job_dir>/run.exit
     ' > <job_dir>/run.log 2>&1 < /dev/null &
     echo $! > <job_dir>/run.pid
@@ -146,10 +169,9 @@ poll_interval_sec = 1.5        # run.log の SSH pull 間隔 / プロセス生�
   - `<job_dir>` = `<run_root>/<run_id>/<job_id>`（`job_id` の形式は CONTRACT.md §1）
   - `PYTHONUNBUFFERED=1` は必須（ログのリアルタイム性のため、下記コラム）。
   - `setsid` で新しいプロセスグループにする（停止時にグループごとkillするため）。
-  - 環境変数は singularity にそのまま引き継がれる前提（`singularity_args` に `--cleanenv` を入れる
-    場合は `SINGULARITYENV_` 接頭辞に切り替える）。
+  - ssh 先がすでに instance 内（§1.6）なので singularity では包まない。
 - **停止**: `run.pid` のプロセスグループ全体へ SIGTERM（`kill -TERM -<pgid>`）、一定時間で終わら
-  なければ SIGKILL。singularity の子の python や DataLoader worker まで確実に止めるため、PID単体
+  なければ SIGKILL。python の子プロセス（DataLoader worker 等）まで確実に止めるため、PID単体
   ではなくグループに送る。
 - **終了検知**: backend が `poll_interval_sec` ごとにSSHで `kill -0 <pid>` と `run.exit` の有無を
   確認する。プロセスが消えたら `run.exit` の終了コードで状態を決める（0 → finished、非0 → failed、
@@ -161,7 +183,7 @@ poll_interval_sec = 1.5        # run.log の SSH pull 間隔 / プロセス生�
   「`[infer]`」ボタンを無効化する。CLIから起動した学習run（§5.2）が running の間も同様に無効化する。
   CLIから手動実行した可視化スクリプト（既存runへの追加）はserverからは実行中か分からないので
   排他の対象外（ユーザーの責任で管理）。
-- **起動失敗**: rsync・SSH・singularity起動のいずれかで失敗した場合、そのジョブは failed とし、
+- **起動失敗**: rsync・SSH・プロセス起動のいずれかで失敗した場合、そのジョブは failed とし、
   エラーメッセージを表示する。
 - **ログ（`run.log`）はSSH pull、メトリクス/画像はHTTP push、と役割を分ける**（下記コラム）。
 - **終了後のログ保存**: ジョブ終了時に `run.log` 全体をローカル（`media_dir`）に取り込み、終了後も
@@ -218,8 +240,10 @@ DVC（run管理機能・checkpoint/データ管理とも）は使わない。コ
 
 ### 学習用PC側の初回準備（手動・1回だけ）
 
-- `repo_dir` の作成、singularity image の配置、image内のpythonでの `venv` 作成と
-  `requirements.txt` のインストール、必要なデータの配置。
+- sandbox への必要パッケージの追加（§1.6 の sshd・tailscale・rsync・util-linux・procps、python と
+  学習に必要なpipパッケージ。RTX 5090 のため torch は cu128 版）、`/opt/sshd/` の設定、startscript、
+  tailnet への参加、必要なデータの配置。リポジトリの `requirements.txt` は GTX 1080 用の cu118 固定なので
+  学習用PCでは使わない。
 
 ## 5. 結果送信の仕組み（client）
 

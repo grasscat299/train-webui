@@ -71,8 +71,8 @@ def make_settings(
     )
     remote = RemoteSettings(
         host="gpu-host", user="u", port=22, key_path="~/.ssh/id_ed25519",
-        repo_dir="/remote/td_plan", sif_path="/remote/image.sif", python="venv/bin/python",
-        run_root="/remote/run_root", singularity_args=[], stop_timeout_sec=1.0,
+        repo_dir="/remote/td_plan", python="python3",
+        run_root="/remote/run_root", stop_timeout_sec=1.0,
     )
     return Settings(
         remote=remote, server=server, poll_interval_sec=poll_interval_sec,

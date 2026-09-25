@@ -1,16 +1,15 @@
 # 学習管理WebUI server の設定（design.md §1.5）。初回は `cp server.example.toml server.toml`。
 # server.toml は git 管理しない。相対パスはリポジトリ直下（td_plan/）からの相対。
 
-[remote]                                   # 学習用PC
-host             = "gpu-host.example"      # ~/.ssh/config の Host エイリアスでも可
-user             = "user"
-port             = 22
+[remote]                                   # 学習用PCの singularity instance 内の sshd（design.md §1.6）
+host             = "100.x.x.x"             # instance の tailscale の IP（~/.ssh/config の Host エイリアスでも可）
+user             = "student"
+port             = 2222
 key_path         = "~/.ssh/id_ed25519"
-repo_dir         = "/home/user/td_plan"          # 学習用PC上のリポジトリ（コード同期先）
-sif_path         = "/path/to/image.sif"               # singularity image
-python           = "venv/bin/python"                  # repo_dir からの相対パス
+# 以下のパスはすべてコンテナの中から見たパス
+repo_dir         = "/home/user/td_plan"          # コード同期先
+python           = "python3"                          # コンテナ内のpython（repo_dir からの相対パスも可）
 run_root         = "/home/user/train_webui_runs"  # run.log / run.pid / run.exit（repo_dirの外）
-singularity_args = ["--nv"]                           # singularity exec に渡す追加引数
 stop_timeout_sec = 10                                 # SIGTERM後、SIGKILLまで待つ秒数
 
 [server]                                   # ローカルPC(WSL)のWebUI server
