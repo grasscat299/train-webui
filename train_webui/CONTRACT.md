@@ -77,8 +77,10 @@ train_webui/
 {"run_id": "...", "label": "infer/xy", "kind": "line" | "scatter", "defined": true,
  "title": "推論結果", "xlabel": "x", "ylabel": "y", "xscale": "linear" | "log", "yscale": "linear" | "log",
  "xlim": [0.0, 1.0] | null, "ylim": null, "updated_at": "...",
- "series": [{"name": "pred", "points": [[x, y], ...]}, ...],
- "last_point_id": 123 | null}   // このレスポンスに含まれる最大の点id（点が無ければ null）
+ "series": [{"name": "pred", "points": [[x, y], ...],
+             "total_points": 52000,      // この系列のDB上の全点数
+             "downsampled": true}, ...], // true なら points は間引き済みの系列全体（差分ではない）
+ "last_point_id": 123 | null}   // このラベルのDB上の最大の点id（点が無ければ null）。間引きで返していない点も含む
 ```
 
 ### 2.2 frontend 向け
@@ -98,7 +100,7 @@ train_webui/
 | `GET /api/jobs/{job_id}/log?offset=N` | `{"data": str, "offset": int, "done": bool}`。ローカルに取り込み済みのログの offset バイト目以降（UTF-8デコード、不正バイトは置換）。`done` はジョブが終了済みかつ全文取り込み済み |
 | `GET /api/runs/{run_id}/results?kind=&label=` | `[Result]`（`sent_at` 古い順）。kind/label は任意の絞り込み |
 | `GET /api/labels?run_ids=a,b,c` | `[{"label": str, "kind": "metric" \| "image" \| "plot"}]`（指定runに現れるラベルの和集合、label順。plot は `plots` テーブルから） |
-| `GET /api/runs/{run_id}/plots?label=&after_id=` | `[Plot]`（label順）。label は任意の絞り込み。`after_id` を付けると id がそれより大きい点だけを `points` に入れる（軸の定義は毎回全部返す）。差分で点が無い系列は `points: []` で返す。runが無ければ404 |
+| `GET /api/runs/{run_id}/plots?label=&after_id=&max_points=` | `[Plot]`（label順）。label は任意の絞り込み。`after_id` を付けると id がそれより大きい点だけを `points` に入れる（軸の定義は毎回全部返す）。差分で点が無い系列は `points: []` で返す。`max_points`（既定1000、1系列あたり）を超える系列は `after_id` を無視して**間引き済みの全体**を返し `downsampled: true`（下記）。runが無ければ404 |
 | `GET /media/...` | 画像ファイル（静的配信） |
 
 - frontend は `/api/tree` `/api/state` を 2〜3 秒ごと、表示中の running run の results とログを
@@ -195,6 +197,17 @@ CREATE INDEX IF NOT EXISTS idx_plot_points_run_label ON plot_points(run_id, labe
 
 run 削除時は `plots` / `plot_points` の該当行も消す。
 
+### 軸つきグラフの間引き（design.md §9）
+
+`GET /api/runs/{run_id}/plots` で、系列の全点数 `n` が `max_points` を超えたら、その系列の全点を id 順に
+読んで以下で間引き、`downsampled: true` で返す（`n <= max_points` なら今まで通り、`downsampled: false`）。
+間引きは `train_webui/backend/decimate.py` に純粋関数として置き、単体テストを書く。
+
+- line: `decimate_minmax(points, max_points)`。id 順の点列を `max_points // 2` 個の区間に等分し、各区間で
+  y 最小・y 最大の点を元の順序で残す（同じ点なら1つ）。最初と最後の点は必ず含める。結果は `max_points` 点以下。
+- scatter: `decimate_stride(points, max_points)`。`i * n // max_points`（i = 0..max_points-1）番目の点を残す。
+- どちらも入力は `(id, x, y)` の列、出力はその部分列（新しい点を作らない）。
+
 ## 5. client（担当A）
 
 design.md §5 のとおり。追加の取り決め：
@@ -239,5 +252,7 @@ design.md §7〜9 のとおり。追加の取り決め：
     （design.md §9 の色・凡例・定義の選び方・log軸の0以下の点の扱い）。
   - 取得は run ごとに `GET /api/runs/{id}/plots`。2回目以降は `after_id=<前回のlast_point_id>` で差分を取り、
     手元の点に追記する。比較対象runが変わったら取り直す。
+  - 系列が `downsampled: true` で返ってきたら、手元のその系列を**置き換える**（追記しない）。
+    その系列には「間引き表示中（元 {total_points} 点 → 表示 {points.length} 点）」を表示する。
   - `VITE_MOCK=1` のモックモードにも Plot のモックデータ（line と scatter を1つずつ）を足す。
 - 見た目は簡素でよいが、左ツリー・タブ・状態表示が一目で分かること。
