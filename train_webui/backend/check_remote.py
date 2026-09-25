@@ -59,8 +59,10 @@ def main() -> None:
         print("\n接続できないため、環境の確認は行いません。")
         return
     print("\n==================== 学習用PCの環境確認（check_env.sh） ====================\n")
-    _run(controller, f"bash -s -- {shlex.quote(settings.server.public_url)}",
-         input=_CHECK_ENV_SCRIPT.read_bytes(), show_stdout_raw=True)
+    # 学習の起動と同じく repo_dir に移動してから実行する（python を相対パスで書いた場合も同じ解決になるように）
+    remote_cmd = (f"cd {shlex.quote(r.repo_dir)} 2>/dev/null; "
+                  f"bash -s -- {shlex.quote(settings.server.public_url)} {shlex.quote(r.python)}")
+    _run(controller, remote_cmd, input=_CHECK_ENV_SCRIPT.read_bytes(), show_stdout_raw=True)
     print("WebUI server に届くかの確認は、WSL で server（python -m train_webui.backend）を起動した状態で行ってください。")
 
 

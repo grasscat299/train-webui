@@ -1,19 +1,21 @@
 #!/bin/bash
 # 学習用PCの singularity instance 内の環境確認（design.md §1.6）。check_remote.py が ssh の標準入力で流して実行する。
-# 引数: [WebUI server の URL]
+# 引数: [WebUI server の URL] [python（server.toml の remote.python）]
 URL="$1"
+PY="${2:-python3}"
 # ssh ログイン時の PATH には /usr/sbin が無いことが多く、sshd / tailscaled を見落とすため足す
 PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
 ok() { echo "OK  $1"; }
 ng() { echo "NG  $1"; }
 
 echo "== コマンド =="
-for c in sshd rsync setsid ps pgrep tailscale tailscaled ts python3; do
+for c in sshd rsync setsid ps pgrep tailscale tailscaled ts; do
   p=$(command -v "$c" 2>/dev/null) && ok "$c ($p)" || ng "$c が見つからない"
 done
 
 echo; echo "== Python パッケージと GPU =="
-python3 - <<'EOF'
+p=$(command -v "$PY" 2>/dev/null) && ok "学習に使う python: $PY ($p)" || ng "学習に使う python（$PY）が見つからない"
+"$PY" - <<'EOF'
 import importlib
 for m in ["torch", "numpy", "matplotlib", "tomli"]:
     try:
@@ -52,7 +54,7 @@ case ":$LD_LIBRARY_PATH:" in *:/.singularity.d/libs:*) ok "LD_LIBRARY_PATH に G
 
 if [ -n "$URL" ]; then
   echo; echo "== WebUI server に届くか =="
-  python3 - "$URL" <<'EOF' && ok "$URL に届いた" || ng "$URL に届かない（server の起動と http_proxy を確認）"
+  "$PY" - "$URL" <<'EOF' && ok "$URL に届いた" || ng "$URL に届かない（server の起動と http_proxy を確認）"
 import sys, urllib.request
 try:
     print("    " + urllib.request.urlopen(sys.argv[1] + "/api/state", timeout=10).read().decode())
