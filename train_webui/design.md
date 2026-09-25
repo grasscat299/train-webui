@@ -417,7 +417,7 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
 | run の状態 | 表示内容 |
 |---|---|
 | draft（起動前の下書き） | configエディタ（編集可）＋「学習開始」ボタン＋削除ボタン |
-| running（実行中） | config（読み取り専用）／ ログ（`run.log` のリアルタイムtail、SSH pull。§4）／ グラフ・画像（clientから送られてきたものをリアルタイム表示）／「中止」ボタン |
+| running（実行中） | config（読み取り専用）／ ログ（`run.log` のリアルタイムtail、SSH pull。§4）／ グラフ・画像（clientから送られてきたものをリアルタイム表示。軸つきグラフ §5.3 も含む）／「中止」ボタン |
 | finished / failed / stopped（終了後） | グラフ・画像一覧／ config（読み取り専用）／ ログ（終了時に取り込んだ全文。failedの場合は最初に目立つように表示）／ 削除ボタン |
 | CLIから起動したrun（running / finished / failed / lost） | 上と同じだが、**ログ欄と「中止」ボタンは無い**（ログは手元のターミナル）。failedならclientが送ったtracebackを表示。lostなら「終了を報告できずに止まった可能性あり」と表示。git情報が最後のWebUI同期時点のものである旨を注記 |
 

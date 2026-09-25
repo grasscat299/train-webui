@@ -9,6 +9,23 @@ export interface PlotEntry {
   plot: Plot;
 }
 
+// 差分で取得した Plot を手元の Plot に反映する。downsampled の系列は置き換え、それ以外は追記する。
+export function mergePlots(prev: Plot[] | undefined, next: Plot[]): Plot[] {
+  const prevByLabel = new Map((prev ?? []).map((p) => [p.label, p]));
+  return next.map((p) => {
+    const old = prevByLabel.get(p.label);
+    if (!old) return p;
+    const oldSeries = new Map(old.series.map((s) => [s.name, s]));
+    return {
+      ...p,
+      series: p.series.map((s) => {
+        const o = oldSeries.get(s.name);
+        return s.downsampled || !o ? s : { ...s, points: [...o.points, ...s.points] };
+      }),
+    };
+  });
+}
+
 // 軸の定義として比較する項目（design.md §9）
 function defKey(p: Plot): string {
   return JSON.stringify([p.kind, p.title, p.xlabel, p.ylabel, p.xscale, p.yscale, p.xlim, p.ylim]);

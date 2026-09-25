@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import type { ImageResult, MetricResult, Result, Run } from '../api';
+import type { ImageResult, MetricResult, Plot, Result, Run } from '../api';
 import { LogView } from './LogView';
 import { MetricChart } from './MetricChart';
 import { ImageViewer } from './ImageViewer';
+import { PlotChart, mergePlots } from './PlotChart';
 
 interface Props {
   runId: string | null;
@@ -20,6 +21,9 @@ function uniqueLabels(results: Result[]): string[] {
 export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
   const [run, setRun] = useState<Run | null>(null);
   const [results, setResults] = useState<Result[]>([]);
+  const [plots, setPlots] = useState<Plot[]>([]);
+  // 軸つきグラフの差分取得用（ポーリング中に最新を参照するため ref に持つ）
+  const plotsRef = useRef<Plot[] | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [configDraft, setConfigDraft] = useState('');
@@ -28,6 +32,8 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
   const [expandedInferJobs, setExpandedInferJobs] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    plotsRef.current = undefined;
+    setPlots([]);
     if (!runId) {
       setRun(null);
       setResults([]);
@@ -44,6 +50,12 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
         const rs = await api.getResults(runId);
         if (cancelled) return;
         setResults(rs);
+        const prev = plotsRef.current;
+        const ids = (prev ?? []).map((p) => p.last_point_id).filter((v): v is number => v !== null);
+        const nextPlots = mergePlots(prev, await api.getPlots(runId, prev && ids.length > 0 ? Math.max(...ids) : null));
+        if (cancelled) return;
+        plotsRef.current = nextPlots;
+        setPlots(nextPlots);
         const live = r.status === 'running' || r.jobs.some((j) => j.kind === 'infer' && j.status === 'running');
         timer = window.setTimeout(tick, live ? 1500 : 5000);
       } catch (e) {
@@ -265,9 +277,15 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
         </div>
       )}
 
-      {metricLabels.length > 0 && (
+      {(metricLabels.length > 0 || plots.length > 0) && (
         <div className="charts">
           <h3>グラフ</h3>
+          {plots.map((p) => (
+            <div key={p.label} className="chart-block">
+              <h4>{p.label}</h4>
+              <PlotChart label={p.label} entries={[{ runId: run.run_id, runLabel: run.run_id, plot: p }]} />
+            </div>
+          ))}
           {metricLabels.map((label) => (
             <div key={label} className="chart-block">
               <h4>{label}</h4>
