@@ -1,0 +1,186 @@
+// CONTRACT.md §2.1, §2.2 に定義された型とAPI呼び出しをここに集約する。
+// VITE_MOCK=1 のときは mock.ts のモック実装を使う（backendが無くても動作確認できるようにする）。
+
+export type RunStatus = 'draft' | 'running' | 'finished' | 'failed' | 'stopped' | 'lost';
+export type JobStatus = 'running' | 'finished' | 'failed' | 'stopped';
+export type JobKind = 'train' | 'infer';
+export type Origin = 'webui' | 'cli';
+
+export interface RunSummary {
+  run_id: string;
+  project: string;
+  group: string;
+  origin: Origin;
+  status: RunStatus;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface Job {
+  job_id: string;
+  run_id: string;
+  kind: JobKind;
+  status: JobStatus;
+  started_at: string;
+  ended_at: string | null;
+  exit_code: number | null;
+  error: string | null;
+}
+
+export interface Run extends RunSummary {
+  config_toml: string;
+  git_commit: string | null;
+  git_diff: string | null;
+  git_untracked: string | null;
+  git_info_source: 'sync' | 'last_sync' | null;
+  hostname: string | null;
+  pid: number | null;
+  last_heartbeat_at: string | null;
+  exit_code: number | null;
+  error: string | null;
+  jobs: Job[];
+}
+
+export interface MetricResult {
+  id: number;
+  run_id: string;
+  kind: 'metric';
+  label: string;
+  step: number | null;
+  value: number;
+  source: string;
+  sent_at: string;
+}
+
+export interface ImageResult {
+  id: number;
+  run_id: string;
+  kind: 'image';
+  label: string;
+  step: number | null;
+  image_url: string;
+  source: string;
+  sent_at: string;
+}
+
+export type Result = MetricResult | ImageResult;
+
+export interface GroupNode {
+  group: string;
+  runs: RunSummary[];
+}
+
+export interface ProjectNode {
+  project: string;
+  groups: GroupNode[];
+}
+
+export interface ActiveInfo {
+  run_id: string;
+  job_id: string | null;
+  kind: JobKind;
+  origin: Origin;
+}
+
+export interface StateResp {
+  busy: boolean;
+  active: ActiveInfo | null;
+}
+
+export interface LabelInfo {
+  label: string;
+  kind: 'metric' | 'image';
+}
+
+export interface JobLogResp {
+  data: string;
+  offset: number;
+  done: boolean;
+}
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+export interface Api {
+  getTree(): Promise<ProjectNode[]>;
+  rescan(): Promise<ProjectNode[]>;
+  getState(): Promise<StateResp>;
+  createDraft(project: string, group: string, newGroup: boolean): Promise<Run>;
+  getRun(runId: string): Promise<Run>;
+  updateConfig(runId: string, configToml: string): Promise<Run>;
+  startRun(runId: string): Promise<Run>;
+  stopRun(runId: string): Promise<Run>;
+  deleteRun(runId: string): Promise<void>;
+  groupInfer(project: string, group: string): Promise<Job>;
+  getJobLog(jobId: string, offset: number): Promise<JobLogResp>;
+  getResults(runId: string, kind?: 'metric' | 'image', label?: string): Promise<Result[]>;
+  getLabels(runIds: string[]): Promise<LabelInfo[]>;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
+  });
+  if (!res.ok) {
+    let detail = res.statusText || `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body && typeof body.detail === 'string') detail = body.detail;
+    } catch {
+      // レスポンスボディがJSONでない場合はそのまま
+    }
+    throw new ApiError(res.status, detail);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+const realApi: Api = {
+  getTree: () => request<ProjectNode[]>('/api/tree'),
+  rescan: () => request<ProjectNode[]>('/api/rescan', { method: 'POST' }),
+  getState: () => request<StateResp>('/api/state'),
+  createDraft: (project, group, newGroup) =>
+    request<Run>('/api/runs/draft', {
+      method: 'POST',
+      body: JSON.stringify({ project, group, new_group: newGroup }),
+    }),
+  getRun: (runId) => request<Run>(`/api/runs/${encodeURIComponent(runId)}`),
+  updateConfig: (runId, configToml) =>
+    request<Run>(`/api/runs/${encodeURIComponent(runId)}/config`, {
+      method: 'PUT',
+      body: JSON.stringify({ config_toml: configToml }),
+    }),
+  startRun: (runId) => request<Run>(`/api/runs/${encodeURIComponent(runId)}/start`, { method: 'POST' }),
+  stopRun: (runId) => request<Run>(`/api/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),
+  deleteRun: (runId) => request<void>(`/api/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
+  groupInfer: (project, group) =>
+    request<Job>('/api/groups/infer', {
+      method: 'POST',
+      body: JSON.stringify({ project, group }),
+    }),
+  getJobLog: (jobId, offset) =>
+    request<JobLogResp>(`/api/jobs/${encodeURIComponent(jobId)}/log?offset=${offset}`),
+  getResults: (runId, kind, label) => {
+    const params = new URLSearchParams();
+    if (kind) params.set('kind', kind);
+    if (label) params.set('label', label);
+    const qs = params.toString();
+    return request<Result[]>(`/api/runs/${encodeURIComponent(runId)}/results${qs ? `?${qs}` : ''}`);
+  },
+  getLabels: (runIds) =>
+    request<LabelInfo[]>(`/api/labels?run_ids=${encodeURIComponent(runIds.join(','))}`),
+};
+
+// eslint 的に import は先頭に置きたいが、循環を避けるため mock.ts からは型のみを参照させ、
+// ここでモック実装を動的にではなく通常 import する（apiMock.ts は api.ts を参照しない）。
+import { mockApi } from './mock';
+
+export const api: Api = import.meta.env.VITE_MOCK === '1' ? mockApi : realApi;

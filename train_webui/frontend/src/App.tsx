@@ -1,0 +1,158 @@
+import { useMemo, useState } from 'react';
+import { api } from './api';
+import type { GroupNode, ProjectNode, RunSummary, StateResp } from './api';
+import { usePolling } from './hooks/usePolling';
+import { Tree } from './components/Tree';
+import { TrainPanel } from './components/TrainPanel';
+import { ResultPanel } from './components/ResultPanel';
+
+type Tab = 'train' | 'result';
+
+export default function App() {
+  const [tab, setTab] = useState<Tab>('train');
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runChecked, setRunChecked] = useState<Record<string, boolean>>({});
+  const [groupChecked, setGroupChecked] = useState<Record<string, boolean>>({});
+  const [projectChecked, setProjectChecked] = useState<Record<string, boolean>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const { data: tree, setData: setTree } = usePolling<ProjectNode[]>(() => api.getTree(), 2500, []);
+  const { data: state } = usePolling<StateResp>(() => api.getState(), 2500, []);
+  const busy = state?.busy ?? false;
+  const treeData = tree ?? [];
+
+  const rescan = async () => {
+    const t = await api.rescan();
+    setTree(t);
+  };
+
+  const groupKey = (p: string, g: string) => `${p}::${g}`;
+  const isRunChecked = (runId: string) => runChecked[runId] ?? false;
+  const isGroupChecked = (p: string, g: string, runs: RunSummary[]) =>
+    runs.length > 0 ? runs.every((r) => isRunChecked(r.run_id)) : (groupChecked[groupKey(p, g)] ?? false);
+  const isProjectChecked = (p: string, groups: GroupNode[]) => {
+    const allRuns = groups.flatMap((g) => g.runs);
+    if (allRuns.length > 0) return groups.every((g) => isGroupChecked(p, g.group, g.runs));
+    return projectChecked[p] ?? false;
+  };
+
+  const toggleRun = (runId: string, val: boolean) => setRunChecked((prev) => ({ ...prev, [runId]: val }));
+  const toggleGroup = (p: string, g: string, runs: RunSummary[], val: boolean) => {
+    setGroupChecked((prev) => ({ ...prev, [groupKey(p, g)]: val }));
+    setRunChecked((prev) => {
+      const next = { ...prev };
+      runs.forEach((r) => {
+        next[r.run_id] = val;
+      });
+      return next;
+    });
+  };
+  const toggleProject = (p: string, groups: GroupNode[], val: boolean) => {
+    setProjectChecked((prev) => ({ ...prev, [p]: val }));
+    groups.forEach((g) => toggleGroup(p, g.group, g.runs, val));
+  };
+
+  const selectedRunIds = useMemo(() => {
+    const ids: string[] = [];
+    treeData.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => {
+      if (isRunChecked(r.run_id)) ids.push(r.run_id);
+    })));
+    return ids;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [treeData, runChecked]);
+
+  const handleNewRunDraft = async (project: string, group: string) => {
+    try {
+      const run = await api.createDraft(project, group, false);
+      await rescan();
+      setSelectedRunId(run.run_id);
+      setTab('train');
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleNewGroup = async (project: string) => {
+    const name = window.prompt('新しいgroup名を入力してください');
+    if (!name) return;
+    try {
+      const run = await api.createDraft(project, name, true);
+      await rescan();
+      setSelectedRunId(run.run_id);
+      setTab('train');
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleInfer = async (project: string, group: string) => {
+    try {
+      await api.groupInfer(project, group);
+      await rescan();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <h1>学習管理WebUI</h1>
+        <nav className="tabs">
+          <button className={tab === 'train' ? 'active' : ''} onClick={() => setTab('train')}>
+            Train
+          </button>
+          <button className={tab === 'result' ? 'active' : ''} onClick={() => setTab('result')}>
+            Result
+          </button>
+        </nav>
+        <button className="rescan" onClick={rescan}>
+          再スキャン
+        </button>
+        {busy && (
+          <span className="busy-badge">
+            GPU使用中{state?.active ? `: ${state.active.run_id} (${state.active.kind})` : ''}
+          </span>
+        )}
+      </header>
+      {actionError && (
+        <div className="error-banner clickable" onClick={() => setActionError(null)}>
+          {actionError}（クリックで閉じる）
+        </div>
+      )}
+      <div className="layout">
+        <Tree
+          tree={treeData}
+          mode={tab}
+          busy={busy}
+          selectedRunId={selectedRunId}
+          onSelectRun={setSelectedRunId}
+          onNewRunDraft={handleNewRunDraft}
+          onNewGroup={handleNewGroup}
+          onInfer={handleInfer}
+          isRunChecked={isRunChecked}
+          isGroupChecked={isGroupChecked}
+          isProjectChecked={isProjectChecked}
+          toggleRun={toggleRun}
+          toggleGroup={toggleGroup}
+          toggleProject={toggleProject}
+        />
+        <main className="main">
+          {tab === 'train' ? (
+            <TrainPanel
+              runId={selectedRunId}
+              busy={busy}
+              onRunChanged={rescan}
+              onDeleted={() => {
+                setSelectedRunId(null);
+                rescan();
+              }}
+            />
+          ) : (
+            <ResultPanel runIds={selectedRunIds} tree={treeData} />
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
