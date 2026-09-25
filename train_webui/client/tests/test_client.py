@@ -242,3 +242,59 @@ def test_calls_before_init_do_not_raise(capsys):
     client.log_image("img", "/no/such/file.png")
     client.finish()
     assert "[train_webui]" in capsys.readouterr().err
+
+
+# --- 軸つきグラフ（define_plot / log_xy） ---
+
+
+class _FakeArray:
+    """numpy/torch の代わり（tolist を持つオブジェクト）。"""
+
+    def __init__(self, values):
+        self._values = values
+
+    def tolist(self):
+        return list(self._values)
+
+
+def test_define_plot_and_log_xy(monkeypatch, fake_server):
+    monkeypatch.setenv("TRAIN_WEBUI_URL", fake_server.url)
+    monkeypatch.setenv("TRAIN_WEBUI_RUN_ID", "20260110_000000")
+    fake_server.route("POST", r"^/api/results$", lambda m, b, q: (204, None))
+
+    client.init()
+    plot = client.define_plot("infer/xy", kind="scatter", xlabel="x", ylabel="y", yscale="log", ylim=(1e-3, 1))
+    plot.add(1, 2, series="pred")
+    plot.add(_FakeArray([1, 2, 3]), [0.1, float("nan"), 0.3], series="target", step=5)
+    client.log_xy("infer/xy", [1, 2], [1])  # 長さ違いは捨てる
+    client.finish()
+
+    items = [item for r in fake_server.requests_for("POST", r"^/api/results$") for item in r.body["items"]]
+    assert [i["kind"] for i in items] == ["plot_def", "plot_points", "plot_points"]
+    d = items[0]
+    assert d["plot_kind"] == "scatter" and d["yscale"] == "log" and d["ylim"] == [0.001, 1.0]
+    assert d["xlim"] is None and d["title"] is None
+    assert items[1]["series"] == "pred" and items[1]["xs"] == [1.0] and items[1]["ys"] == [2.0]
+    assert items[2]["xs"] == [1.0, 3.0] and items[2]["ys"] == [0.1, 0.3] and items[2]["step"] == 5
+
+
+def test_define_plot_invalid_args_not_sent(monkeypatch, fake_server, capsys):
+    monkeypatch.setenv("TRAIN_WEBUI_URL", fake_server.url)
+    monkeypatch.setenv("TRAIN_WEBUI_RUN_ID", "20260111_000000")
+    fake_server.route("POST", r"^/api/results$", lambda m, b, q: (204, None))
+
+    client.init()
+    client.define_plot("a", kind="bar")
+    client.define_plot("b", xscale="symlog")
+    client.define_plot("c", xlim=(1, 2, 3))
+    client.finish()
+
+    assert fake_server.requests_for("POST", r"^/api/results$") == []
+    assert capsys.readouterr().err.count("[train_webui]") >= 3
+
+
+def test_plot_handle_without_init_is_harmless(monkeypatch):
+    monkeypatch.setattr(_core, "_client", None)
+    plot = client.define_plot("x")
+    plot.add(1, 1)
+    assert plot.label == "x"

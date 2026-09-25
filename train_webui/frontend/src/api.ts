@@ -66,6 +66,31 @@ export interface ImageResult {
 
 export type Result = MetricResult | ImageResult;
 
+// 軸つきグラフ（design.md §5.3）。downsampled=true の系列は points が間引き済みの全体（差分ではない）。
+export interface PlotSeries {
+  name: string;
+  points: [number, number][];
+  total_points: number;
+  downsampled: boolean;
+}
+
+export interface Plot {
+  run_id: string;
+  label: string;
+  kind: 'line' | 'scatter';
+  defined: boolean;
+  title: string | null;
+  xlabel: string;
+  ylabel: string;
+  xscale: 'linear' | 'log';
+  yscale: 'linear' | 'log';
+  xlim: [number, number] | null;
+  ylim: [number, number] | null;
+  updated_at: string;
+  series: PlotSeries[];
+  last_point_id: number | null;
+}
+
 export interface GroupNode {
   group: string;
   runs: RunSummary[];
@@ -90,7 +115,7 @@ export interface StateResp {
 
 export interface LabelInfo {
   label: string;
-  kind: 'metric' | 'image';
+  kind: 'metric' | 'image' | 'plot';
 }
 
 export interface JobLogResp {
@@ -122,6 +147,7 @@ export interface Api {
   getJobLog(jobId: string, offset: number): Promise<JobLogResp>;
   getResults(runId: string, kind?: 'metric' | 'image', label?: string): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
+  getPlots(runId: string, afterId?: number | null): Promise<Plot[]>;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -177,6 +203,10 @@ const realApi: Api = {
   },
   getLabels: (runIds) =>
     request<LabelInfo[]>(`/api/labels?run_ids=${encodeURIComponent(runIds.join(','))}`),
+  getPlots: (runId, afterId) =>
+    request<Plot[]>(
+      `/api/runs/${encodeURIComponent(runId)}/plots${afterId != null ? `?after_id=${afterId}` : ''}`,
+    ),
 };
 
 // eslint 的に import は先頭に置きたいが、循環を避けるため mock.ts からは型のみを参照させ、

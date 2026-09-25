@@ -4,12 +4,13 @@ from __future__ import annotations
 import base64
 import binascii
 import ipaddress
+import math
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 
 from . import discovery
 from .db import Database, now_iso
+from .decimate import decimate_minmax, decimate_stride
 from .ids import new_run_id
 from .jobs import JobBusyError, JobManager
 from .remote.types import RemoteControllerProtocol
@@ -70,11 +72,24 @@ class FinishRequest(BaseModel):
 
 
 class ResultItem(BaseModel):
-    kind: Literal["metric", "image"]
+    kind: Literal["metric", "image", "plot_def", "plot_points"]
     label: str
     step: int | None = None
     value: float | None = None
     image_b64: str | None = None
+    # plot_def
+    plot_kind: Literal["line", "scatter"] | None = None
+    title: str | None = None
+    xlabel: str | None = None
+    ylabel: str | None = None
+    xscale: Literal["linear", "log"] | None = None
+    yscale: Literal["linear", "log"] | None = None
+    xlim: tuple[float, float] | None = None
+    ylim: tuple[float, float] | None = None
+    # plot_points
+    series: str | None = None
+    xs: list[float] | None = None
+    ys: list[float] | None = None
     sent_at: str
 
 
@@ -125,6 +140,78 @@ def _result_public(row: dict) -> dict:
     else:
         base["value"] = row["value"]
     return base
+
+
+def _plot_public(db: Database, row: dict, after_id: int | None, max_points: int, upto: int) -> dict:
+    """CONTRACT.md §2.1 の Plot。max_points を超える系列は間引き済みの全体を返す（§4）。
+
+    upto（リクエスト開始時点の最大の点id）以下の点だけを扱う。読んでいる途中に追加された点を
+    last_point_id に含めてしまうと、次回の after_id による差分取得でその点が漏れるため。
+    """
+    run_id, label = row["run_id"], row["label"]
+    series = []
+    for stat in db.list_plot_series_stats(run_id, label, upto):
+        total = stat["total"]
+        if total > max_points:
+            pts = db.list_plot_points(run_id, label, stat["series"], upto)
+            decimate = decimate_minmax if row["kind"] == "line" else decimate_stride
+            pts = decimate(pts, max_points)
+            downsampled = True
+        else:
+            pts = db.list_plot_points(run_id, label, stat["series"], upto, after_id=after_id)
+            downsampled = False
+        series.append({
+            "name": stat["series"], "points": [[x, y] for _id, x, y in pts],
+            "total_points": total, "downsampled": downsampled,
+        })
+
+    def lim(lo, hi):
+        return [lo, hi] if lo is not None and hi is not None else None
+
+    return {
+        "run_id": run_id, "label": label, "kind": row["kind"], "defined": bool(row["defined"]),
+        "title": row["title"], "xlabel": row["xlabel"], "ylabel": row["ylabel"],
+        "xscale": row["xscale"], "yscale": row["yscale"],
+        "xlim": lim(row["xmin"], row["xmax"]), "ylim": lim(row["ymin"], row["ymax"]),
+        "updated_at": row["updated_at"], "series": series,
+        "last_point_id": db.max_plot_point_id(run_id, label, upto=upto),
+    }
+
+
+def _check_label_kind(db: Database, run_id: str, label: str, is_plot: bool) -> None:
+    """同じ run で plot と metric/image に同じラベルを使わせない（CONTRACT.md §2.3）。"""
+    if is_plot:
+        other = db.result_label_kind(run_id, label)
+        if other is not None:
+            raise HTTPException(400, f"ラベル {label} は既に {other} として使われています")
+    elif db.get_plot(run_id, label) is not None:
+        raise HTTPException(400, f"ラベル {label} は既に plot として使われています")
+
+
+def _save_plot_item(db: Database, run_id: str, source: str, item: ResultItem) -> None:
+    if item.kind == "plot_def":
+        if item.plot_kind is None or item.xscale is None or item.yscale is None:
+            raise HTTPException(400, "plot_def には plot_kind / xscale / yscale が必要です")
+        xlim = item.xlim or (None, None)
+        ylim = item.ylim or (None, None)
+        db.upsert_plot(
+            run_id=run_id, label=item.label, kind=item.plot_kind, title=item.title,
+            xlabel=item.xlabel or "", ylabel=item.ylabel or "", xscale=item.xscale, yscale=item.yscale,
+            xmin=xlim[0], xmax=xlim[1], ymin=ylim[0], ymax=ylim[1], defined=1, updated_at=item.sent_at,
+        )
+        return
+    xs, ys = item.xs or [], item.ys or []
+    if len(xs) != len(ys):
+        raise HTTPException(400, "xs と ys の長さが違います")
+    if not all(math.isfinite(v) for v in (*xs, *ys)):
+        raise HTTPException(400, "xs / ys に有限でない値があります")
+    if db.get_plot(run_id, item.label) is None:
+        db.upsert_plot(
+            run_id=run_id, label=item.label, kind="line", title=None, xlabel="", ylabel="",
+            xscale="linear", yscale="linear", xmin=None, xmax=None, ymin=None, ymax=None,
+            defined=0, updated_at=item.sent_at,
+        )
+    db.add_plot_points(run_id, item.label, item.series or "default", xs, ys, item.step, source, item.sent_at)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +411,15 @@ def create_app(
             raise HTTPException(404, "run が見つかりません")
         return [_result_public(r) for r in db.list_results(run_id, kind=kind, label=label)]
 
+    @app.get("/api/runs/{run_id}/plots")
+    def get_plots(run_id: str, label: str | None = None, after_id: int | None = None,
+                  max_points: int = Query(1000, ge=4)) -> list[dict]:
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        upto = db.max_plot_point_id(run_id) or 0
+        return [_plot_public(db, row, after_id, max_points, upto) for row in db.list_plots(run_id, label=label)]
+
     @app.get("/api/labels")
     def get_labels(run_ids: str = "") -> list[dict]:
         ids = [r for r in run_ids.split(",") if r]
@@ -379,6 +475,11 @@ def create_app(
         if run is None:
             raise HTTPException(404, "run が見つかりません")
         for item in body.items:
+            is_plot = item.kind in ("plot_def", "plot_points")
+            _check_label_kind(db, body.run_id, item.label, is_plot)
+            if is_plot:
+                _save_plot_item(db, body.run_id, body.source, item)
+                continue
             if item.kind == "metric":
                 db.create_result(
                     run_id=body.run_id, kind="metric", label=item.label, step=item.step,

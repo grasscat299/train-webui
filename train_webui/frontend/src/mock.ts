@@ -14,6 +14,7 @@ import type {
   ImageResult,
   LabelInfo,
   JobLogResp,
+  Plot,
 } from './api';
 
 type StoredRun = Omit<Run, 'jobs'>;
@@ -101,6 +102,26 @@ function pushMetric(runId: string, label: string, step: number | null, value: nu
   const r: MetricResult = { id: nextResultId++, run_id: runId, kind: 'metric', label, step, value, source, sent_at: sentAt };
   list.push(r);
   resultsByRun.set(runId, list);
+}
+
+// 軸つきグラフ: 点には backend と同じく通し番号の id を振る
+type MockPlotDef = Omit<Plot, 'series' | 'last_point_id'>;
+interface MockPlotPoint { id: number; series: string; x: number; y: number }
+const plotsByRun = new Map<string, Map<string, { def: MockPlotDef; points: MockPlotPoint[] }>>();
+let nextPointId = 1;
+const MOCK_MAX_POINTS = 1000;
+
+function definePlot(runId: string, def: Omit<MockPlotDef, 'run_id' | 'defined' | 'updated_at'>) {
+  const byLabel = plotsByRun.get(runId) ?? new Map();
+  const prev = byLabel.get(def.label);
+  byLabel.set(def.label, { def: { ...def, run_id: runId, defined: true, updated_at: isoNow() }, points: prev?.points ?? [] });
+  plotsByRun.set(runId, byLabel);
+}
+
+function pushPlotPoints(runId: string, label: string, series: string, xs: number[], ys: number[]) {
+  const entry = plotsByRun.get(runId)?.get(label);
+  if (!entry) return;
+  xs.forEach((x, i) => entry.points.push({ id: nextPointId++, series, x, y: ys[i] }));
 }
 
 function pushImage(runId: string, label: string, step: number | null, imageUrl: string, source: string, sentAt = isoNow()) {
@@ -238,6 +259,20 @@ function seed() {
     pushMetric(t1.run_id, 'train/loss', step, Number(loss.toFixed(4)), 'train', hoursAgo(72 - i * 0.2).toISOString());
   }
   pushImage(t1.run_id, 'train/sample', 0, dummyImage('train/sample', 0, '#2563eb'), 'train', hoursAgo(72).toISOString());
+  definePlot(t1.run_id, {
+    label: 'infer/curve', kind: 'line', title: '推論カーブ', xlabel: 't', ylabel: 'value',
+    xscale: 'linear', yscale: 'linear', xlim: null, ylim: null,
+  });
+  const ts = Array.from({ length: 200 }, (_, i) => i / 20);
+  pushPlotPoints(t1.run_id, 'infer/curve', 'pred', ts, ts.map((t) => Math.sin(t) + Math.random() * 0.1));
+  pushPlotPoints(t1.run_id, 'infer/curve', 'target', ts, ts.map((t) => Math.sin(t)));
+  definePlot(t1.run_id, {
+    label: 'infer/scatter', kind: 'scatter', title: null, xlabel: 'x', ylabel: 'y',
+    xscale: 'linear', yscale: 'log', xlim: null, ylim: null,
+  });
+  // 間引き表示の確認用に上限（1000点）を超える点を入れる
+  const xs = Array.from({ length: 3000 }, () => Math.random() * 10);
+  pushPlotPoints(t1.run_id, 'infer/scatter', 'default', xs, xs.map((x) => Math.exp(-x / 3) + Math.random() * 0.05));
   pushImage(t1.run_id, 'train/sample', 800, dummyImage('train/sample', 800, '#2563eb'), 'train', hoursAgo(71.2).toISOString());
   const inferJobId = generateJobId(t1.run_id, 'infer');
   addJob(t1.run_id, {
@@ -442,6 +477,13 @@ function tick() {
         const loss = Math.max(0.02, 1.0 * Math.exp(-ticks / 8) + Math.random() * 0.02);
         pushMetric(run.run_id, 'train/loss', step, Number(loss.toFixed(4)), 'train', now);
         pushMetric(run.run_id, 'train/lr', step, 0.0003, 'train', now);
+        if (!plotsByRun.get(run.run_id)?.has('train/xy')) {
+          definePlot(run.run_id, {
+            label: 'train/xy', kind: 'line', title: null, xlabel: 'x', ylabel: 'y',
+            xscale: 'linear', yscale: 'linear', xlim: null, ylim: null,
+          });
+        }
+        pushPlotPoints(run.run_id, 'train/xy', 'default', [Math.cos(ticks / 3) * ticks], [Math.sin(ticks / 3) * ticks]);
         if (ticks % 5 === 0) {
           pushImage(run.run_id, 'train/sample', step, dummyImage('train/sample', step, '#2563eb'), 'train', now);
         }
@@ -572,6 +614,7 @@ async function deleteRun(runId: string): Promise<void> {
   runs.delete(runId);
   jobsByRun.delete(runId);
   resultsByRun.delete(runId);
+  plotsByRun.delete(runId);
 }
 
 async function groupInfer(project: string, group: string): Promise<Job> {
@@ -608,14 +651,43 @@ async function getResults(runId: string, kind?: 'metric' | 'image', label?: stri
 }
 
 async function getLabels(runIds: string[]): Promise<LabelInfo[]> {
-  const map = new Map<string, 'metric' | 'image'>();
+  const map = new Map<string, LabelInfo['kind']>();
   for (const id of runIds) {
     for (const r of resultsByRun.get(id) ?? []) {
       map.set(r.label, r.kind);
     }
+    for (const label of plotsByRun.get(id)?.keys() ?? []) {
+      map.set(label, 'plot');
+    }
   }
   return Array.from(map.entries())
     .map(([label, kind]) => ({ label, kind }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// backend と同じく、上限を超えた系列は間引き済みの全体を返す（モックでは等間隔に間引くだけ）
+async function getPlots(runId: string, afterId?: number | null): Promise<Plot[]> {
+  const byLabel = plotsByRun.get(runId);
+  if (!byLabel) return [];
+  return Array.from(byLabel.values())
+    .map(({ def, points }) => {
+      const names = Array.from(new Set(points.map((p) => p.series)));
+      const series = names.map((name) => {
+        const all = points.filter((p) => p.series === name);
+        const downsampled = all.length > MOCK_MAX_POINTS;
+        const picked = downsampled
+          ? Array.from({ length: MOCK_MAX_POINTS }, (_, i) => all[Math.floor((i * all.length) / MOCK_MAX_POINTS)])
+          : all.filter((p) => afterId == null || p.id > afterId);
+        return {
+          name,
+          points: picked.map((p) => [p.x, p.y] as [number, number]),
+          total_points: all.length,
+          downsampled,
+        };
+      });
+      const lastId = points.length > 0 ? points[points.length - 1].id : null;
+      return { ...def, series, last_point_id: lastId };
+    })
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
@@ -633,4 +705,5 @@ export const mockApi: Api = {
   getJobLog,
   getResults,
   getLabels,
+  getPlots,
 };

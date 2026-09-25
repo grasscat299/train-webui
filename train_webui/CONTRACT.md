@@ -203,10 +203,14 @@ run 削除時は `plots` / `plot_points` の該当行も消す。
 読んで以下で間引き、`downsampled: true` で返す（`n <= max_points` なら今まで通り、`downsampled: false`）。
 間引きは `train_webui/backend/decimate.py` に純粋関数として置き、単体テストを書く。
 
-- line: `decimate_minmax(points, max_points)`。id 順の点列を `max_points // 2` 個の区間に等分し、各区間で
-  y 最小・y 最大の点を元の順序で残す（同じ点なら1つ）。最初と最後の点は必ず含める。結果は `max_points` 点以下。
+- line: `decimate_minmax(points, max_points)`。id 順の点列を `(max_points - 2) // 2` 個の区間に等分し、各区間で
+  y 最小・y 最大の点を元の順序で残す（同じ点なら1つ）。最初と最後の点は必ず含める（その2点ぶん区間を減らす）。
+  結果は `max_points` 点以下。`max_points` は4以上（API は4未満を422にする）。
 - scatter: `decimate_stride(points, max_points)`。`i * n // max_points`（i = 0..max_points-1）番目の点を残す。
 - どちらも入力は `(id, x, y)` の列、出力はその部分列（新しい点を作らない）。
+- `GET /api/runs/{run_id}/plots` はリクエスト開始時点のその run の最大の点idを取り、それ以下の点だけを
+  返す（`total_points`・`last_point_id` も同様）。読んでいる途中に追加された点を `last_point_id` に含めると、
+  次回の差分取得で漏れるため。frontend は全ラベルの `last_point_id` の最大値を次回の `after_id` にする。
 
 ## 5. client（担当A）
 

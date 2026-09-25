@@ -68,6 +68,38 @@ CREATE TABLE IF NOT EXISTS results (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_run_id ON jobs(run_id);
 CREATE INDEX IF NOT EXISTS idx_results_run_id ON results(run_id);
+
+CREATE TABLE IF NOT EXISTS plots (
+    run_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT,
+    xlabel TEXT NOT NULL,
+    ylabel TEXT NOT NULL,
+    xscale TEXT NOT NULL,
+    yscale TEXT NOT NULL,
+    xmin REAL,
+    xmax REAL,
+    ymin REAL,
+    ymax REAL,
+    defined INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, label)
+);
+
+CREATE TABLE IF NOT EXISTS plot_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    series TEXT NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    step INTEGER,
+    source TEXT NOT NULL,
+    sent_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_plot_points_run_label ON plot_points(run_id, label, id);
 """
 
 
@@ -117,6 +149,8 @@ class Database:
     def delete_run(self, run_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM results WHERE run_id = ?", (run_id,))
+            conn.execute("DELETE FROM plot_points WHERE run_id = ?", (run_id,))
+            conn.execute("DELETE FROM plots WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM jobs WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
 
@@ -269,7 +303,88 @@ class Database:
         placeholders = ", ".join("?" for _ in run_ids)
         with self._connect() as conn:
             rows = conn.execute(
-                f"SELECT DISTINCT label, kind FROM results WHERE run_id IN ({placeholders}) ORDER BY label ASC",
-                run_ids,
+                f"SELECT DISTINCT label, kind FROM results WHERE run_id IN ({placeholders}) "
+                f"UNION SELECT DISTINCT label, 'plot' AS kind FROM plots WHERE run_id IN ({placeholders}) "
+                "ORDER BY label ASC",
+                [*run_ids, *run_ids],
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def result_label_kind(self, run_id: str, label: str) -> str | None:
+        """その run で label が metric/image として使われていればその kind を返す。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT kind FROM results WHERE run_id = ? AND label = ? LIMIT 1", (run_id, label),
+            ).fetchone()
+        return row["kind"] if row else None
+
+    # ---- plots（軸つきグラフ） -----------------------------------------
+
+    def get_plot(self, run_id: str, label: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM plots WHERE run_id = ? AND label = ?", (run_id, label),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_plot(self, **fields: Any) -> None:
+        cols = list(fields.keys())
+        placeholders = ", ".join("?" for _ in cols)
+        sql = f"INSERT OR REPLACE INTO plots ({', '.join(cols)}) VALUES ({placeholders})"
+        with self._connect() as conn:
+            conn.execute(sql, [fields[c] for c in cols])
+
+    def list_plots(self, run_id: str, label: str | None = None) -> list[dict]:
+        query = "SELECT * FROM plots WHERE run_id = ?"
+        params: list[Any] = [run_id]
+        if label is not None:
+            query += " AND label = ?"
+            params.append(label)
+        query += " ORDER BY label ASC"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_plot_points(self, run_id: str, label: str, series: str, xs: list[float], ys: list[float],
+                        step: int | None, source: str, sent_at: str) -> None:
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO plot_points (run_id, label, series, x, y, step, source, sent_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(run_id, label, series, x, y, step, source, sent_at) for x, y in zip(xs, ys)],
+            )
+
+    def list_plot_series_stats(self, run_id: str, label: str, upto: int) -> list[dict]:
+        """系列ごとの全点数と最初の点id（最初に現れた順に並べるため）。id が upto 以下の点だけを数える。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT series, COUNT(*) AS total, MIN(id) AS first_id FROM plot_points "
+                "WHERE run_id = ? AND label = ? AND id <= ? GROUP BY series ORDER BY first_id ASC",
+                (run_id, label, upto),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_plot_points(self, run_id: str, label: str, series: str, upto: int,
+                         after_id: int | None = None) -> list[tuple]:
+        query = "SELECT id, x, y FROM plot_points WHERE run_id = ? AND label = ? AND series = ? AND id <= ?"
+        params: list[Any] = [run_id, label, series, upto]
+        if after_id is not None:
+            query += " AND id > ?"
+            params.append(after_id)
+        query += " ORDER BY id ASC"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [(r["id"], r["x"], r["y"]) for r in rows]
+
+    def max_plot_point_id(self, run_id: str, label: str | None = None, upto: int | None = None) -> int | None:
+        query = "SELECT MAX(id) AS m FROM plot_points WHERE run_id = ?"
+        params: list[Any] = [run_id]
+        if label is not None:
+            query += " AND label = ?"
+            params.append(label)
+        if upto is not None:
+            query += " AND id <= ?"
+            params.append(upto)
+        with self._connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return row["m"]

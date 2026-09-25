@@ -1,7 +1,25 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import type { ImageResult, LabelInfo, MetricResult, ProjectNode, Result } from '../api';
+import type { ImageResult, LabelInfo, MetricResult, Plot, ProjectNode, Result } from '../api';
 import { MetricChart } from './MetricChart';
+import { PlotChart } from './PlotChart';
+
+// 差分で取得した Plot を手元の Plot に反映する。downsampled の系列は置き換え、それ以外は追記する。
+function mergePlots(prev: Plot[] | undefined, next: Plot[]): Plot[] {
+  const prevByLabel = new Map((prev ?? []).map((p) => [p.label, p]));
+  return next.map((p) => {
+    const old = prevByLabel.get(p.label);
+    if (!old) return p;
+    const oldSeries = new Map(old.series.map((s) => [s.name, s]));
+    return {
+      ...p,
+      series: p.series.map((s) => {
+        const o = oldSeries.get(s.name);
+        return s.downsampled || !o ? s : { ...s, points: [...o.points, ...s.points] };
+      }),
+    };
+  });
+}
 
 interface RunMeta {
   project: string;
@@ -13,6 +31,9 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
   const [labels, setLabels] = useState<LabelInfo[]>([]);
   const [selectedLabels, setSelectedLabels] = useState<Record<string, boolean>>({});
   const [resultsByRun, setResultsByRun] = useState<Record<string, Result[]>>({});
+  const [plotsByRun, setPlotsByRun] = useState<Record<string, Plot[]>>({});
+  // 差分取得用: runごとの手元の Plot（ポーリング中に最新を参照するため ref に持つ）
+  const plotsRef = useRef<Record<string, Plot[]>>({});
   const [error, setError] = useState<string | null>(null);
 
   const runMetaMap = useMemo(() => {
@@ -26,6 +47,9 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
   const key = runIds.slice().sort().join(',');
 
   useEffect(() => {
+    // 比較対象runが変わったら軸つきグラフは取り直す
+    plotsRef.current = {};
+    setPlotsByRun({});
     if (runIds.length === 0) {
       setLabels([]);
       setResultsByRun({});
@@ -48,6 +72,16 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
         const entries = await Promise.all(runIds.map(async (id) => [id, await api.getResults(id)] as const));
         if (cancelled) return;
         setResultsByRun(Object.fromEntries(entries));
+        const plotEntries = await Promise.all(runIds.map(async (id) => {
+          const prev = plotsRef.current[id];
+          // 点のidはrun内で通し番号なので、全ラベルの最大の last_point_id 以降を取れば差分になる
+          const ids = (prev ?? []).map((p) => p.last_point_id).filter((v): v is number => v !== null);
+          const afterId = prev && ids.length > 0 ? Math.max(...ids) : null;
+          return [id, mergePlots(prev, await api.getPlots(id, afterId))] as const;
+        }));
+        if (cancelled) return;
+        plotsRef.current = Object.fromEntries(plotEntries);
+        setPlotsByRun(plotsRef.current);
         setError(null);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -87,7 +121,15 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
         .map((l) => (
           <section key={l.label} className="result-section">
             <h3>{l.label}</h3>
-            {l.kind === 'metric' ? (
+            {l.kind === 'plot' ? (
+              <PlotChart
+                label={l.label}
+                entries={runIds.flatMap((id) => {
+                  const plot = (plotsByRun[id] ?? []).find((p) => p.label === l.label);
+                  return plot ? [{ runId: id, runLabel: `${id} (${runMetaMap[id]?.group ?? '-'})`, plot }] : [];
+                })}
+              />
+            ) : l.kind === 'metric' ? (
               <MetricChart
                 series={runIds.map((id) => ({
                   runId: id,

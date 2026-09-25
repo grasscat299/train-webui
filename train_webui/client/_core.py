@@ -1,7 +1,7 @@
 """train_webui client の実装本体（design.md §5, CONTRACT.md §5）。標準ライブラリのみで書く。
 
 公開APIは `train_webui/client/__init__.py` から export する。ここはモジュールレベルの
-状態（`_client`）を1つ持ち、init/log/log_image/finish の実処理を行う。
+状態（`_client`）を1つ持ち、init/log/log_image/define_plot/log_xy/finish の実処理を行う。
 """
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import atexit
 import base64
 import io
 import json
+import math
 import os
 import queue
 import re
@@ -46,6 +47,24 @@ def _now_iso() -> str:
 def _repo_root() -> Path:
     # train_webui パッケージの親（CONTRACT.md §5）。 client/_core.py -> client -> train_webui -> repo_root
     return Path(__file__).resolve().parents[2]
+
+
+def _to_float_list(value) -> list[float]:
+    """スカラーか配列（list/tuple/numpy/torch）を float のリストにする。numpy/torch は import しない。"""
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return [float(v) for v in value]
+    return [float(value)]
+
+
+def _valid_lim(lim) -> bool:
+    if lim is None:
+        return True
+    try:
+        return len([float(v) for v in lim]) == 2
+    except (TypeError, ValueError):
+        return False
 
 
 class _NotFoundError(Exception):
@@ -229,6 +248,50 @@ class _Client:
             "sent_at": _now_iso(),
         })
 
+    def define_plot(self, label: str, kind: str, title: str | None, xlabel: str, ylabel: str,
+                    xscale: str, yscale: str, xlim, ylim) -> None:
+        if not self.can_send:
+            return
+        if kind not in ("line", "scatter"):
+            _warn(f"kindは\"line\"か\"scatter\"を指定してください(label={label}, kind={kind!r})。送信しません。")
+            return
+        if xscale not in ("linear", "log") or yscale not in ("linear", "log"):
+            _warn(f"xscale/yscaleは\"linear\"か\"log\"を指定してください(label={label})。送信しません。")
+            return
+        if not _valid_lim(xlim) or not _valid_lim(ylim):
+            _warn(f"xlim/ylimはNoneか2要素の数値を指定してください(label={label})。送信しません。")
+            return
+        self._queue.put({
+            "kind": "plot_def", "label": label, "plot_kind": kind, "title": title,
+            "xlabel": xlabel, "ylabel": ylabel, "xscale": xscale, "yscale": yscale,
+            "xlim": [float(v) for v in xlim] if xlim is not None else None,
+            "ylim": [float(v) for v in ylim] if ylim is not None else None,
+            "sent_at": _now_iso(),
+        })
+
+    def log_xy(self, label: str, x, y, series: str, step: int | None) -> None:
+        if not self.can_send:
+            return
+        try:
+            xs = _to_float_list(x)
+            ys = _to_float_list(y)
+        except (TypeError, ValueError) as e:
+            _warn(f"数値に変換できない値のため破棄しました(label={label}): {e}")
+            return
+        if len(xs) != len(ys):
+            _warn(f"xとyの長さが違うため破棄しました(label={label}, x={len(xs)}, y={len(ys)})")
+            return
+        pairs = [(a, b) for a, b in zip(xs, ys) if math.isfinite(a) and math.isfinite(b)]
+        if len(pairs) != len(xs):
+            _warn(f"NaN/infの点を{len(xs) - len(pairs)}個破棄しました(label={label})")
+        if not pairs:
+            return
+        self._queue.put({
+            "kind": "plot_points", "label": label, "series": series,
+            "xs": [a for a, _ in pairs], "ys": [b for _, b in pairs],
+            "step": step, "sent_at": _now_iso(),
+        })
+
     def do_finish(self, status: str, error: str | None) -> None:
         with self._finish_lock:
             if self._finished:
@@ -396,6 +459,27 @@ def log_image(label: str, fig_or_path, step: int | None) -> None:
         _client.log_image(label, fig_or_path, step)
     except Exception as e:
         _warn(f"log_imageの処理に失敗しました: {e}")
+
+
+def define_plot(label: str, kind: str, title: str | None, xlabel: str, ylabel: str,
+                xscale: str, yscale: str, xlim, ylim) -> None:
+    if _client is None:
+        _warn("init前にdefine_plotが呼ばれたため無視します。")
+        return
+    try:
+        _client.define_plot(label, kind, title, xlabel, ylabel, xscale, yscale, xlim, ylim)
+    except Exception as e:
+        _warn(f"define_plotの処理に失敗しました: {e}")
+
+
+def log_xy(label: str, x, y, series: str, step: int | None) -> None:
+    if _client is None:
+        _warn("init前にlog_xyが呼ばれたため無視します。")
+        return
+    try:
+        _client.log_xy(label, x, y, series, step)
+    except Exception as e:
+        _warn(f"log_xyの処理に失敗しました: {e}")
 
 
 def finish() -> None:
