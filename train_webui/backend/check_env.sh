@@ -16,13 +16,31 @@ done
 echo; echo "== Python パッケージと GPU =="
 p=$(command -v "$PY" 2>/dev/null) && ok "学習に使う python: $PY ($p)" || ng "学習に使う python（$PY）が見つからない"
 "$PY" - <<'EOF'
-import importlib
+import importlib, subprocess, sys
+
+def pip_show(name):
+    r = subprocess.run([sys.executable, "-m", "pip", "show", name], capture_output=True, text=True)
+    if "No module named pip" in r.stderr:
+        return None, "pip が使えない"
+    info = dict(line.split(": ", 1) for line in r.stdout.splitlines() if ": " in line)
+    if r.returncode != 0 or "Version" not in info:
+        return False, "pip: 見つからない"
+    return True, f"pip: {info['Version']} @ {info.get('Location', '?')}"
+
+mismatch = False
 for m in ["torch", "numpy", "matplotlib", "tomli"]:
+    found, pip_part = pip_show(m)
     try:
-        mod = importlib.import_module(m)
-        print(f"OK  {m} {getattr(mod, '__version__', '')}")
+        importlib.import_module(m)
+        print(f"OK  {m}（{pip_part}）")
     except Exception as e:
-        print(f"NG  {m}: {e}")
+        print(f"NG  {m} を import できない: {e}（{pip_part}）")
+        if found:
+            mismatch = True
+if mismatch:
+    print("    → pip では入っているのに import できないものがある。上の Location がこの python の sys.path に無い:")
+    for p in sys.path:
+        print(f"      {p}")
 try:
     import torch
     print(f"--  torch の CUDA 版: {torch.version.cuda} / 対応アーキテクチャ: {torch.cuda.get_arch_list()}")
