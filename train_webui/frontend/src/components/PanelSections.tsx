@@ -22,7 +22,8 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const { view, update } = useView();
 
-  const startResize = (e: ReactPointerEvent<HTMLDivElement>, mode: 'chart' | 'image') => {
+  // corner: 右下の角（幅と高さ）、right: 右辺（幅だけ）
+  const startResize = (e: ReactPointerEvent<HTMLDivElement>, mode: 'chart' | 'image', handle: 'corner' | 'right') => {
     e.preventDefault();
     const panel = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
     const startX = e.clientX;
@@ -34,7 +35,7 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
       if (mode === 'chart') {
         // グリッドの 1fr で最小幅より広がっていることがあるので、実際の幅を起点にする
         update('panelWidth', panel.width + dx);
-        update('chartHeight', start.chartHeight + dy);
+        if (handle === 'corner') update('chartHeight', start.chartHeight + dy);
       } else {
         update('imageWidth', start.imageWidth + dx);
       }
@@ -42,9 +43,9 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      document.body.classList.remove('resizing-panel');
+      document.body.classList.remove('resizing-panel', 'resizing-panel-x');
     };
-    document.body.classList.add('resizing-panel');
+    document.body.classList.add(handle === 'corner' ? 'resizing-panel' : 'resizing-panel-x');
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
@@ -91,13 +92,18 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
                     </div>
                     {item.content}
                     <div
+                      className="panel-resize-right"
+                      title={(item.resize ?? 'chart') === 'chart' ? 'ドラッグで全グラフの幅を変更' : 'ドラッグで全画像の幅を変更'}
+                      onPointerDown={(e) => startResize(e, item.resize ?? 'chart', 'right')}
+                    />
+                    <div
                       className="panel-resize"
                       title={
                         (item.resize ?? 'chart') === 'chart'
                           ? 'ドラッグで全グラフの大きさを変更'
                           : 'ドラッグで全画像の幅を変更'
                       }
-                      onPointerDown={(e) => startResize(e, item.resize ?? 'chart')}
+                      onPointerDown={(e) => startResize(e, item.resize ?? 'chart', 'corner')}
                     />
                   </div>
                 ))}

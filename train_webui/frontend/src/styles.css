@@ -455,3 +455,14 @@ body.resizing { cursor: col-resize; user-select: none; }
 }
 .panel:hover .panel-resize { opacity: 1; }
 body.resizing-panel { cursor: nwse-resize; user-select: none; }
+/* パネルの右辺（幅だけ変える）。角のつまみと重ならないよう下端は空ける */
+.panel-resize-right {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 16px;
+  width: 7px;
+  cursor: ew-resize;
+}
+.panel-resize-right:hover { background: linear-gradient(90deg, transparent 2px, var(--accent) 2px 4px, transparent 4px); opacity: 0.5; }
+body.resizing-panel-x { cursor: ew-resize; user-select: none; }
