@@ -250,6 +250,18 @@ button { font: inherit; color: inherit; }
 .panel-subtitle { color: var(--muted); font-weight: 400; }
 .plot-chart-head { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 4px; }
 .plot-chart-note { font-size: 11px; color: #b25e09; }
+.scale-toggles { margin-left: auto; display: flex; gap: 4px; }
+.scale-toggle {
+  font-size: 10px;
+  font-family: var(--mono);
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+.scale-toggle:hover { color: var(--accent); border-color: var(--accent); }
 
 /* config・ログなどの折りたたみブロック */
 .block {

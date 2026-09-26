@@ -1,5 +1,8 @@
 import { CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from 'recharts';
+import { useState } from 'react';
 import type { Plot } from '../api';
+import { ScaleToggle } from './ScaleToggle';
+import type { AxisScale } from './ScaleToggle';
 
 import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE } from './chartStyle';
 
@@ -34,10 +37,15 @@ function defKey(p: Plot): string {
 // 軸つきグラフ（design.md §5.3, §9）。比較対象runの同じラベルの全系列を1つの軸に重ねる。
 // 見出し（ラベル・title）はパネル側（PanelSections）で出すので、ここでは注記とグラフだけ描く。
 export function PlotChart({ entries }: { entries: PlotEntry[] }) {
+  // 画面上で切り替えた軸のスケール。null なら define_plot で送られた定義に従う
+  const [xOverride, setXOverride] = useState<AxisScale | null>(null);
+  const [yOverride, setYOverride] = useState<AxisScale | null>(null);
   if (entries.length === 0) return <div className="no-image">データなし</div>;
 
   // 軸の定義は updated_at が最新のものを使う
   const def = entries.map((e) => e.plot).reduce((a, b) => (b.updated_at > a.updated_at ? b : a));
+  const xscale = xOverride ?? def.xscale;
+  const yscale = yOverride ?? def.yscale;
   const defsDiffer = new Set(entries.map((e) => defKey(e.plot))).size > 1;
   const onlyDefault = entries.every((e) => e.plot.series.every((s) => s.name === 'default'));
 
@@ -46,7 +54,7 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
   const lines = entries.flatMap((e) =>
     e.plot.series.map((s) => {
       const visible = s.points.filter(
-        ([x, y]) => !(def.xscale === 'log' && x <= 0) && !(def.yscale === 'log' && y <= 0),
+        ([x, y]) => !(xscale === 'log' && x <= 0) && !(yscale === 'log' && y <= 0),
       );
       hiddenOnLog += s.points.length - visible.length;
       const name = onlyDefault ? e.runLabel : `${s.name} @ ${e.runLabel}`;
@@ -62,21 +70,23 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
 
   return (
     <div className="plot-chart">
-      {(defsDiffer || notes.length > 0) && (
-        <div className="plot-chart-head">
-          {defsDiffer && <span className="plot-chart-note">runによって軸の定義が異なります</span>}
-          {notes.map((n) => (
-            <span key={n} className="plot-chart-note">{n}</span>
-          ))}
-        </div>
-      )}
+      <div className="plot-chart-head">
+        {defsDiffer && <span className="plot-chart-note">runによって軸の定義が異なります</span>}
+        {notes.map((n) => (
+          <span key={n} className="plot-chart-note">{n}</span>
+        ))}
+        <span className="scale-toggles">
+          <ScaleToggle axis="X" value={xscale} onChange={setXOverride} />
+          <ScaleToggle axis="Y" value={yscale} onChange={setYOverride} />
+        </span>
+      </div>
       <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
         <ComposedChart margin={CHART_MARGIN}>
           <CartesianGrid stroke="var(--grid)" vertical={false} />
           <XAxis
             dataKey="x"
             type="number"
-            scale={scaleOf(def.xscale)}
+            scale={scaleOf(xscale)}
             domain={domainOf(def.xlim)}
             allowDataOverflow={def.xlim !== null}
             tick={TICK}
@@ -85,7 +95,7 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
           <YAxis
             dataKey="y"
             type="number"
-            scale={scaleOf(def.yscale)}
+            scale={scaleOf(yscale)}
             domain={domainOf(def.ylim)}
             allowDataOverflow={def.ylim !== null}
             tick={TICK}
