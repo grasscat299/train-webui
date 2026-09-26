@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { GroupNode, ProjectNode, RunSummary } from '../api';
+import { EyeToggle } from './EyeToggle';
 
 export interface TreeProps {
   tree: ProjectNode[];
@@ -39,10 +40,9 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
           {open ? '▼' : '▶'}
         </button>
         {mode === 'result' && (
-          <input
-            type="checkbox"
-            checked={isProjectChecked(node.project, node.groups)}
-            onChange={(e) => toggleProject(node.project, node.groups, e.target.checked)}
+          <EyeToggle
+            on={isProjectChecked(node.project, node.groups)}
+            onChange={(on) => toggleProject(node.project, node.groups, on)}
           />
         )}
         <span className="tree-project-name">{node.project}</span>
@@ -98,10 +98,9 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
           {open ? '▼' : '▶'}
         </button>
         {mode === 'result' && (
-          <input
-            type="checkbox"
-            checked={isGroupChecked(project, node.group, node.runs)}
-            onChange={(e) => toggleGroup(project, node.group, node.runs, e.target.checked)}
+          <EyeToggle
+            on={isGroupChecked(project, node.group, node.runs)}
+            onChange={(on) => toggleGroup(project, node.group, node.runs, on)}
           />
         )}
         <span className="tree-group-name">{node.group}</span>
@@ -116,7 +115,7 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
           {node.runs.map((r) => (
             <div key={r.run_id} className={`tree-row tree-run-row ${selectedRunId === r.run_id ? 'selected' : ''}`}>
               {mode === 'result' && (
-                <input type="checkbox" checked={isRunChecked(r.run_id)} onChange={(e) => toggleRun(r.run_id, e.target.checked)} />
+                <EyeToggle on={isRunChecked(r.run_id)} onChange={(on) => toggleRun(r.run_id, on)} />
               )}
               <button className="tree-run-btn" onClick={() => onSelectRun(r.run_id)}>
                 <span className={`status-dot status-${r.status}`} title={r.status} />
