@@ -118,6 +118,7 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
+  overflow: hidden; /* ページ全体はスクロールさせない（中の各領域がそれぞれスクロールする） */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", Meiryo, sans-serif;
   font-size: 13px;
   color: var(--text);
@@ -289,7 +290,9 @@ button { font: inherit; color: inherit; }
 .eye-toggle:hover { background: var(--bg); color: var(--accent); }
 
 /* ---- メイン ---- */
-.main { flex: 1; overflow-y: auto; padding: 16px 20px 40px; }
+.main { flex: 1; overflow-y: auto; padding: 16px 20px 40px; scrollbar-width: none; }
+/* メインの縦スクロールバーは表示しない（ホイール・トラックパッドでのスクロールはできる） */
+.main::-webkit-scrollbar { display: none; }
 .panel-empty { color: var(--muted); padding: 24px 4px; }
 
 .error-banner, .warn-banner {
