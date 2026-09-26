@@ -128,10 +128,10 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
               const imgs = (resultsByRun[id] ?? [])
                 .filter((r): r is ImageResult => r.kind === 'image' && r.label === l.label)
                 .sort((a, b) => b.sent_at.localeCompare(a.sent_at));
+              if (imgs.length === 0) return null; // 画像の無い run は何も出さない
               return (
                 <div key={id} className="image-run">
                   <div className="image-run-title">{runLabel(id)}</div>
-                  {imgs.length === 0 && <div className="no-image">画像なし</div>}
                   {imgs.map((img, i) => (
                     <div key={img.id} className="image-item">
                       <div className="image-item-title">
