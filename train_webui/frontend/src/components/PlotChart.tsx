@@ -4,7 +4,7 @@ import type { Plot } from '../api';
 import { ScaleToggle } from './ScaleToggle';
 import type { AxisScale } from './ScaleToggle';
 
-import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE } from './chartStyle';
+import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE, niceLogDomain } from './chartStyle';
 
 export interface PlotEntry {
   runId: string;
@@ -65,8 +65,9 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
   if (hiddenOnLog > 0) notes.push(`log軸で表示できない0以下の点 ${hiddenOnLog} 個を省略`);
 
   const scaleOf = (s: 'linear' | 'log') => (s === 'log' ? 'log' : 'linear');
-  const domainOf = (lim: [number, number] | null) =>
-    lim ? lim : (['auto', 'auto'] as [string, string]);
+  // 範囲が指定されていればそれ。無ければ log 軸だけきりのいい値まで広げる（linear 軸は Recharts が丸める）
+  const domainOf = (lim: [number, number] | null, scale: AxisScale, values: number[]) =>
+    lim ? lim : scale === 'log' ? niceLogDomain(values) : (['auto', 'auto'] as [string, string]);
 
   return (
     <div className="plot-chart">
@@ -87,7 +88,7 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
             dataKey="x"
             type="number"
             scale={scaleOf(xscale)}
-            domain={domainOf(def.xlim)}
+            domain={domainOf(def.xlim, xscale, lines.flatMap((l) => l.data.map((d) => d.x)))}
             allowDataOverflow={def.xlim !== null}
             tick={TICK}
             label={def.xlabel ? { value: def.xlabel, position: 'insideBottom', offset: -4, style: TICK } : undefined}
@@ -96,7 +97,7 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
             dataKey="y"
             type="number"
             scale={scaleOf(yscale)}
-            domain={domainOf(def.ylim)}
+            domain={domainOf(def.ylim, yscale, lines.flatMap((l) => l.data.map((d) => d.y)))}
             allowDataOverflow={def.ylim !== null}
             tick={TICK}
             label={def.ylabel ? { value: def.ylabel, angle: -90, position: 'insideLeft', style: TICK } : undefined}

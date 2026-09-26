@@ -4,7 +4,7 @@ import type { MetricResult } from '../api';
 import { ScaleToggle } from './ScaleToggle';
 import type { AxisScale } from './ScaleToggle';
 
-import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE } from './chartStyle';
+import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE, niceLogDomain } from './chartStyle';
 
 export interface MetricSeries {
   runId: string;
@@ -30,7 +30,11 @@ export function MetricChart({ series }: { series: MetricSeries[] }) {
         <LineChart margin={CHART_MARGIN}>
           <CartesianGrid stroke="var(--grid)" vertical={false} />
           <XAxis dataKey="step" type="number" allowDuplicatedCategory={false} tick={TICK} />
-          <YAxis tick={TICK} scale={yscale} domain={['auto', 'auto']} />
+          <YAxis
+            tick={TICK}
+            scale={yscale}
+            domain={yscale === 'log' ? niceLogDomain(series.flatMap((s) => s.points.map((p) => p.value))) : ['auto', 'auto']}
+          />
           <Tooltip contentStyle={TOOLTIP_STYLE} />
           <Legend wrapperStyle={LEGEND_STYLE} iconSize={8} />
           {series.map((s, i) => (
