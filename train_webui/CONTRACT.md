@@ -93,10 +93,10 @@ train_webui/
 | `POST /api/runs/draft` | body `{"project": str, "group": str, "new_group": bool}`。§3（design.md）の規則で初期configを決めて draft を作る。`new_group=true` なら `[wandb].group` の値を `group` に書き換える。返り値 Run |
 | `GET /api/runs/{run_id}` | Run |
 | `PUT /api/runs/{run_id}/config` | body `{"config_toml": str}`。draftのみ（それ以外409）。TOMLとして不正なら400。`[wandb].group` が変わっていればgroupも更新。返り値 Run |
-| `POST /api/runs/{run_id}/start` | draft を起動（コード同期→config書き込み→trainジョブ起動）。busyなら409。返り値 Run（同期・起動は裏で進み、失敗したら run は failed・`error` に理由） |
+| `POST /api/runs/{run_id}/start` | draft を起動（コード同期→config書き込み→trainジョブ起動）。busyなら409。学習用PCのGPUを他の人が使用中なら409、確認できなければ502（design.md §4。どちらも draft のまま）。返り値 Run（同期・起動は裏で進み、失敗したら run は failed・`error` に理由） |
 | `POST /api/runs/{run_id}/stop` | そのrunで running のジョブ（train か infer）を停止。無ければ409。返り値 Run |
 | `DELETE /api/runs/{run_id}` | draft または終了済みrunを結果ごと削除。running なら409。204 |
-| `POST /api/groups/infer` | body `{"project": str, "group": str}`。そのgroupで最後に起動された train の run（draft以外、origin不問）を対象に infer ジョブを起動。対象runが無ければ404、busyなら409。返り値 Job |
+| `POST /api/groups/infer` | body `{"project": str, "group": str}`。そのgroupで最後に起動された train の run（draft以外、origin不問）を対象に infer ジョブを起動。対象runが無ければ404、busyなら409、学習用PCのGPUを他の人が使用中なら409、確認できなければ502。返り値 Job |
 | `GET /api/jobs/{job_id}/log?offset=N` | `{"data": str, "offset": int, "done": bool}`。ローカルに取り込み済みのログの offset バイト目以降（UTF-8デコード、不正バイトは置換）。`done` はジョブが終了済みかつ全文取り込み済み |
 | `GET /api/runs/{run_id}/results?kind=&label=` | `[Result]`（`sent_at` 古い順）。kind/label は任意の絞り込み |
 | `GET /api/labels?run_ids=a,b,c` | `[{"label": str, "kind": "metric" \| "image" \| "plot"}]`（指定runに現れるラベルの和集合、label順。plot は `plots` テーブルから） |

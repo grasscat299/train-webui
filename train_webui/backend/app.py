@@ -281,6 +281,20 @@ def create_app(
 
     # ---- frontend 向け（CONTRACT.md §2.2） ---------------------------
 
+    def check_gpu_free() -> None:
+        """学習用PCのGPUを他の人が使っていないか確認し、使っていれば起動させない（design.md §4）。"""
+        try:
+            usage = remote.gpu_usage()
+        except Exception as e:  # ssh 失敗等。確認できないまま起動はしない
+            raise HTTPException(502, f"学習用PCのGPU使用状況を確認できないため起動しません: {e}") from e
+        threshold = settings.gpu_busy_threshold_mib
+        if usage.other_mib > threshold:
+            raise HTTPException(
+                409,
+                f"学習用PCのGPUを他の人が使用中のため起動しません（自分たち以外で {usage.other_mib} MiB 使用中、"
+                f"しきい値 {threshold:g} MiB）",
+            )
+
     @app.get("/api/tree")
     def get_tree() -> list[dict]:
         return _build_tree(db, settings)
@@ -355,6 +369,7 @@ def create_app(
         busy, _active = job_manager.get_busy_state()
         if busy:
             raise HTTPException(409, "GPUを使用中の別のジョブがあります")
+        await run_in_threadpool(check_gpu_free)
         try:
             await run_in_threadpool(job_manager.start_train, run_id)
         except JobBusyError as e:
@@ -395,6 +410,7 @@ def create_app(
         busy, _active = job_manager.get_busy_state()
         if busy:
             raise HTTPException(409, "GPUを使用中の別のジョブがあります")
+        await run_in_threadpool(check_gpu_free)
         try:
             job = await run_in_threadpool(job_manager.start_infer, target["run_id"], body.project)
         except JobBusyError as e:

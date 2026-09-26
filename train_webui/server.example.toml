@@ -27,6 +27,11 @@ poll_interval_sec = 1.5                    # run.log の pull / ジョブ生存�
 [heartbeat]
 lost_after_sec = 180                       # CLI起動runのheartbeatがこの秒数途絶えたら lost
 
+[gpu]
+# 学習開始・[infer] の前に学習用PCのGPUを確認し、自分たち以外（他の人）がこのMiB数より多くGPUメモリを
+# 使っていたら起動しない（design.md §4）。省略時 1024。
+busy_threshold_mib = 1024
+
 [sync]
 # コードrsync（design.md §4.5）で除外するパス（rsyncの --exclude パターン）。
 exclude = [

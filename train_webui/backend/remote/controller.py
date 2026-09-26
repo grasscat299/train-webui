@@ -11,7 +11,7 @@ import time
 
 from ..settings import Settings
 from .errors import RemoteError
-from .types import CommandRunner, JobState, LaunchResult, LaunchSpec, SyncInfo
+from .types import CommandRunner, GpuUsage, JobState, LaunchResult, LaunchSpec, SyncInfo
 
 _SSH_TIMEOUT_SEC = 30.0
 _RSYNC_TIMEOUT_SEC = 300.0
@@ -99,6 +99,29 @@ class RemoteController:
         self._check(proc, "ログの取得")
         data = proc.stdout
         return data, offset + len(data)
+
+    def gpu_usage(self) -> GpuUsage:
+        # instance は --containall で PID 名前空間が分かれているため、ps では他の人のプロセスは見えない。
+        # nvidia-smi のメモリ使用量は GPU 全体の値なので、そこから「ps にも見える（= 自分たちの）プロセス」の
+        # 分を引いた残りを、他の人の使用量とみなす。
+        cmd = (
+            "nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits; echo ---; "
+            "nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits; echo ---; "
+            "ps -eo pid --no-headers"
+        )
+        proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
+        self._check(proc, "GPU使用状況の確認")
+        parts = proc.stdout.decode("utf-8", errors="replace").split("---")
+        if len(parts) != 3:
+            raise RemoteError(f"GPU使用状況の出力を解釈できませんでした: {proc.stdout[-500:]!r}")
+        total = sum(int(v) for v in parts[0].split() if v.strip().isdigit())
+        own_pids = {int(v) for v in parts[2].split() if v.strip().isdigit()}
+        own = 0
+        for line in parts[1].splitlines():
+            cols = [c.strip() for c in line.split(",")]
+            if len(cols) == 2 and cols[0].isdigit() and cols[1].isdigit() and int(cols[0]) in own_pids:
+                own += int(cols[1])
+        return GpuUsage(total_used_mib=total, own_mib=own)
 
     # ------------------------------------------------------------------
     # ssh/rsync コマンド組み立て

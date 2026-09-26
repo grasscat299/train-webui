@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from train_webui.backend.remote.types import JobState, LaunchResult, LaunchSpec, SyncInfo
+from train_webui.backend.remote.types import GpuUsage, JobState, LaunchResult, LaunchSpec, SyncInfo
 from train_webui.backend.settings import RemoteSettings, ServerSettings, Settings
 
 
@@ -20,6 +20,8 @@ class FakeRemote:
         self.logs: dict[str, bytes] = {}
         self.fail_sync = False
         self.fail_launch = False
+        self.gpu = GpuUsage(total_used_mib=0, own_mib=0)
+        self.fail_gpu = False
         self._next_pid = 1000
 
     def sync_code(self) -> SyncInfo:
@@ -50,6 +52,11 @@ class FakeRemote:
         data = self.logs.get(job_dir, b"")
         chunk = data[offset:]
         return chunk, offset + len(chunk)
+
+    def gpu_usage(self) -> GpuUsage:
+        if self.fail_gpu:
+            raise RuntimeError("ssh に失敗しました（fake）")
+        return self.gpu
 
     # ---- テストヘルパー -------------------------------------------------
 

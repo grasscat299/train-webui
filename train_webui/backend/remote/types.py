@@ -38,6 +38,17 @@ class JobState:
     exit_code: int | None  # alive=False かつ run.exit があればその値。無ければ None
 
 
+@dataclass(frozen=True)
+class GpuUsage:
+    total_used_mib: int  # nvidia-smi の GPU 全体の使用メモリ（コンテナの外のプロセスも含む。複数GPUなら合計）
+    own_mib: int         # そのうち、コンテナ内から見える（= 自分たちの）プロセスが使っているメモリ
+
+    @property
+    def other_mib(self) -> int:
+        """自分たち以外（コンテナの外 = 他の人）が使っているメモリ。"""
+        return max(self.total_used_mib - self.own_mib, 0)
+
+
 class CommandRunner(Protocol):
     """サブプロセス実行の抽象。テストでは偽物に差し替えて、組み立てたコマンドを検査する。"""
 
@@ -60,3 +71,6 @@ class RemoteControllerProtocol(Protocol):
 
     def read_log(self, job_dir: str, offset: int) -> tuple[bytes, int]:
         """run.log の offset バイト目以降を返す（新しい offset も返す）。ファイルが無ければ (b"", offset)。"""
+
+    def gpu_usage(self) -> GpuUsage:
+        """学習用PCのGPUの使用メモリを、全体と自分たちのプロセスの分に分けて返す（起動前の使用中チェック用）。"""
