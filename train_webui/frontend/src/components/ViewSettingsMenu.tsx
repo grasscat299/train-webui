@@ -3,6 +3,7 @@ import type { ViewSettings } from '../viewSettings';
 import { VIEW_LIMITS } from '../viewSettings';
 
 const ROWS: { key: keyof ViewSettings; label: string; unit: string }[] = [
+  { key: 'fontScale', label: '文字の大きさ', unit: '%' },
   { key: 'navWidth', label: 'ナビの幅', unit: 'px' },
   { key: 'panelWidth', label: 'グラフの幅', unit: 'px' },
   { key: 'chartHeight', label: 'グラフの高さ', unit: 'px' },

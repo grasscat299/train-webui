@@ -119,26 +119,27 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", Meiryo, sans-serif;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--text);
   background: var(--bg);
 }
 button { font: inherit; color: inherit; }
 
-.app { display: flex; flex-direction: column; height: 100vh; }
+/* 文字の倍率（--font-scale）は .app に付くので、基準の文字サイズもここで決める */
+.app { display: flex; flex-direction: column; height: 100vh; font-size: calc(13px * var(--font-scale, 1)); }
 
 /* ---- 上部バー ---- */
 .topbar {
   display: flex;
   align-items: center;
   gap: 20px;
-  height: 44px;
+  min-height: 44px;
   padding: 0 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-.topbar h1 { font-size: 14px; margin: 0; font-weight: 700; letter-spacing: 0.02em; }
-.tabs { display: flex; height: 100%; }
+.topbar h1 { font-size: calc(14px * var(--font-scale, 1)); margin: 0; font-weight: 700; letter-spacing: 0.02em; }
+.tabs { display: flex; align-self: stretch; }
 .tabs button {
   background: none;
   border: none;
@@ -166,7 +167,7 @@ button { font: inherit; color: inherit; }
   border: 1px solid var(--warn-border);
   padding: 2px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 .layout { display: flex; flex: 1; min-height: 0; }
@@ -248,7 +249,7 @@ button { font: inherit; color: inherit; }
   text-align: left;
   width: 100%;
 }
-.run-id { font-family: var(--mono); font-size: 12px; }
+.run-id { font-family: var(--mono); font-size: calc(12px * var(--font-scale, 1)); }
 .run-name { font-weight: 500; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--dim); }
 .status-dot.status-running { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -260,7 +261,7 @@ button { font: inherit; color: inherit; }
 .cli-badge {
   color: var(--muted);
   border: 1px solid var(--border);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   padding: 0 5px;
   border-radius: 999px;
 }
@@ -295,7 +296,7 @@ button { font: inherit; color: inherit; }
 .error-banner.clickable { cursor: pointer; margin: 8px 16px 0; }
 .warn-banner { background: var(--note-bg); color: var(--note-text); border: 1px solid var(--note-border); }
 .note { color: var(--muted); margin: 6px 0; }
-.error-badge { color: var(--danger); font-size: 11px; margin-left: 6px; }
+.error-badge { color: var(--danger); font-size: calc(11px * var(--font-scale, 1)); margin-left: 6px; }
 
 /* run のヘッダー */
 .run-header {
@@ -306,10 +307,10 @@ button { font: inherit; color: inherit; }
   margin-bottom: 12px;
 }
 .run-title { display: flex; align-items: center; gap: 10px; }
-.run-title h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.run-title h2 { margin: 0; font-size: calc(18px * var(--font-scale, 1)); font-weight: 600; }
 .meta { color: var(--muted); margin-top: 4px; }
 .status-pill {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   padding: 1px 8px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -356,11 +357,11 @@ button { font: inherit; color: inherit; }
   padding: 6px 2px;
   font-weight: 600;
 }
-.section-caret { color: var(--muted); font-size: 11px; width: 10px; }
+.section-caret { color: var(--muted); font-size: calc(11px * var(--font-scale, 1)); width: 10px; }
 .section-count {
   color: var(--muted);
   font-weight: 400;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -388,7 +389,7 @@ button { font: inherit; color: inherit; }
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   margin-bottom: 6px;
   overflow: hidden;
@@ -397,10 +398,10 @@ button { font: inherit; color: inherit; }
 }
 .panel-subtitle { color: var(--muted); font-weight: 400; }
 .plot-chart-head { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 4px; }
-.plot-chart-note { font-size: 11px; color: var(--warn-text); }
+.plot-chart-note { font-size: calc(11px * var(--font-scale, 1)); color: var(--warn-text); }
 .scale-toggles { margin-left: auto; display: flex; gap: 4px; }
 .scale-toggle {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-family: var(--mono);
   padding: 0 6px;
   border: 1px solid var(--border);
@@ -424,7 +425,7 @@ details.block:not([open]) > .block-title { margin-bottom: 0; }
 .config-editor {
   width: 100%;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.5;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -441,7 +442,7 @@ details.block:not([open]) > .block-title { margin-bottom: 0; }
   background: var(--log-bg);
   color: var(--log-text);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.45;
   padding: 10px 12px;
   border-radius: 6px;
@@ -450,7 +451,7 @@ details.block:not([open]) > .block-title { margin-bottom: 0; }
   white-space: pre-wrap;
   word-break: break-all;
 }
-.log-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
+.log-error { color: var(--danger); font-size: calc(12px * var(--font-scale, 1)); margin-top: 4px; }
 
 .infer-history { list-style: none; padding: 0; margin: 0; }
 .infer-history li { margin-bottom: 4px; }
@@ -461,14 +462,14 @@ details.block:not([open]) > .block-title { margin-bottom: 0; }
   padding: 2px 0;
   text-align: left;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* 画像 */
 .image-viewer img { width: var(--image-width, 720px); max-width: 100%; border-radius: 4px; display: block; }
-.image-viewer-controls { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; font-size: 11px; color: var(--muted); }
+.image-viewer-controls { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; font-size: calc(11px * var(--font-scale, 1)); color: var(--muted); }
 .image-viewer-controls button {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   padding: 1px 6px;
   border: 1px solid var(--border);
   background: var(--panel);
@@ -476,14 +477,14 @@ details.block:not([open]) > .block-title { margin-bottom: 0; }
   cursor: pointer;
 }
 .image-viewer-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
-.no-image { color: var(--muted); font-size: 12px; padding: 16px; border: 1px dashed var(--border); border-radius: 6px; text-align: center; }
+.no-image { color: var(--muted); font-size: calc(12px * var(--font-scale, 1)); padding: 16px; border: 1px dashed var(--border); border-radius: 6px; text-align: center; }
 .image-list { display: flex; flex-direction: column; gap: 16px; }
 .image-item { min-width: 0; }
 .image-run { display: flex; flex-direction: column; gap: 12px; }
 .image-run + .image-run { border-top: 1px solid var(--border); padding-top: 14px; }
-.image-run-title { font-weight: 600; font-size: 12px; color: var(--text); }
+.image-run-title { font-weight: 600; font-size: calc(12px * var(--font-scale, 1)); color: var(--text); }
 .image-item-index { font-family: var(--mono); color: var(--text); }
-.image-item-title { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.image-item-title { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: calc(11px * var(--font-scale, 1)); color: var(--muted); margin-bottom: 6px; }
 .image-item img { width: var(--image-width, 720px); max-width: 100%; border-radius: 4px; display: block; }
 
 /* Result タブのラベル切り替え */
@@ -494,7 +495,7 @@ details.block:not([open]) > .block-title { margin-bottom: 0; }
   color: var(--muted);
   border-radius: 999px;
   padding: 2px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
   text-decoration: line-through;
 }
@@ -523,16 +524,16 @@ body.resizing { cursor: col-resize; user-select: none; }
   right: 0;
   top: calc(100% + 6px);
   z-index: 10;
-  width: 320px;
+  width: 380px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--shadow);
   padding: 10px 12px;
 }
-.view-menu-row { display: grid; grid-template-columns: 110px 1fr 52px; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+.view-menu-row { display: grid; grid-template-columns: 8.5em 1fr 4.5em; align-items: center; gap: 8px; padding: 4px 0; font-size: calc(12px * var(--font-scale, 1)); }
 .view-menu-label { color: var(--muted); }
-.view-menu-value { text-align: right; font-family: var(--mono); font-size: 11px; }
+.view-menu-value { text-align: right; font-family: var(--mono); font-size: calc(11px * var(--font-scale, 1)); }
 .view-menu-row input[type="range"] { width: 100%; accent-color: var(--accent); }
 .view-menu-reset {
   margin-top: 6px;
@@ -540,7 +541,7 @@ body.resizing { cursor: col-resize; user-select: none; }
   background: var(--panel);
   border-radius: 6px;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
   color: var(--muted);
 }
@@ -594,7 +595,12 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
   color: var(--muted);
   border-radius: 6px;
   padding: 3px 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 .view-menu-theme button.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* グラフ内の文字（Recharts が属性・インライン style で付ける大きさ）も文字の倍率に合わせる */
+.recharts-cartesian-axis-tick-value, .recharts-label { font-size: calc(11px * var(--font-scale, 1)); }
+.recharts-legend-wrapper { font-size: calc(11px * var(--font-scale, 1)) !important; }
+.recharts-default-tooltip { font-size: calc(12px * var(--font-scale, 1)) !important; }
