@@ -271,6 +271,7 @@ button { font: inherit; color: inherit; }
   margin-bottom: 10px;
 }
 .panel {
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -437,3 +438,18 @@ body.resizing { cursor: col-resize; user-select: none; }
   color: var(--muted);
 }
 .view-menu-reset:hover { color: var(--text); background: var(--bg); }
+
+/* パネル右下の大きさ変更つまみ（マウスを乗せた時だけ見える） */
+.panel-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  opacity: 0;
+  background:
+    linear-gradient(135deg, transparent 0 55%, #adb5bd 55% 62%, transparent 62% 72%, #adb5bd 72% 79%, transparent 79%);
+}
+.panel:hover .panel-resize { opacity: 1; }
+body.resizing-panel { cursor: nwse-resize; user-select: none; }

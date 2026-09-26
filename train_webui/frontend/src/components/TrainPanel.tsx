@@ -164,6 +164,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
     })),
     ...imageLabels.map((label) => ({
       label,
+      resize: 'image' as const,
       content: <ImageViewer images={results.filter((r): r is ImageResult => r.kind === 'image' && r.label === label)} />,
     })),
   ];

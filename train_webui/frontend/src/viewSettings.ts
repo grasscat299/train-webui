@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 // 画面の大きさの設定（ナビ幅・パネル幅・グラフ高さ・画像幅）。CSS 変数として .app に渡し、各所の CSS がそれを使う。
@@ -51,6 +51,18 @@ export function useViewSettings() {
   const update = (key: keyof ViewSettings, value: number) => setView((prev) => ({ ...prev, [key]: clamp(key, value) }));
   const reset = () => setView({ ...DEFAULT_VIEW });
   return { view, update, reset };
+}
+
+// パネルのドラッグで大きさを変えるため、設定の値と更新関数を画面のどこからでも使えるようにする
+export const ViewContext = createContext<{
+  view: ViewSettings;
+  update: (key: keyof ViewSettings, value: number) => void;
+} | null>(null);
+
+export function useView() {
+  const ctx = useContext(ViewContext);
+  if (!ctx) throw new Error('ViewContext.Provider の外で useView が呼ばれました');
+  return ctx;
 }
 
 export function viewStyle(view: ViewSettings): CSSProperties {

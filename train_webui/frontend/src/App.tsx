@@ -7,7 +7,7 @@ import { TrainPanel } from './components/TrainPanel';
 import { ResultPanel } from './components/ResultPanel';
 import { NavResizer } from './components/NavResizer';
 import { ViewSettingsMenu } from './components/ViewSettingsMenu';
-import { DEFAULT_VIEW, useViewSettings, viewStyle } from './viewSettings';
+import { DEFAULT_VIEW, ViewContext, useViewSettings, viewStyle } from './viewSettings';
 
 type Tab = 'train' | 'result';
 
@@ -109,71 +109,73 @@ export default function App() {
   };
 
   return (
-    <div className="app" style={viewStyle(view)}>
-      <header className="topbar">
-        <h1>学習管理WebUI</h1>
-        <nav className="tabs">
-          <button className={tab === 'train' ? 'active' : ''} onClick={() => setTab('train')}>
-            Train
+    <ViewContext.Provider value={{ view, update: updateView }}>
+      <div className="app" style={viewStyle(view)}>
+        <header className="topbar">
+          <h1>学習管理WebUI</h1>
+          <nav className="tabs">
+            <button className={tab === 'train' ? 'active' : ''} onClick={() => setTab('train')}>
+              Train
+            </button>
+            <button className={tab === 'result' ? 'active' : ''} onClick={() => setTab('result')}>
+              Result
+            </button>
+          </nav>
+          <ViewSettingsMenu view={view} onChange={updateView} onReset={resetView} />
+          <button className="rescan" onClick={rescan}>
+            再スキャン
           </button>
-          <button className={tab === 'result' ? 'active' : ''} onClick={() => setTab('result')}>
-            Result
-          </button>
-        </nav>
-        <ViewSettingsMenu view={view} onChange={updateView} onReset={resetView} />
-        <button className="rescan" onClick={rescan}>
-          再スキャン
-        </button>
-        {busy && (
-          <span className="busy-badge">
-            GPU使用中{state?.active ? `: ${state.active.run_id} (${state.active.kind})` : ''}
-          </span>
-        )}
-      </header>
-      {actionError && (
-        <div className="error-banner clickable" onClick={() => setActionError(null)}>
-          {actionError}（クリックで閉じる）
-        </div>
-      )}
-      <div className="layout">
-        <Tree
-          tree={treeData}
-          mode={tab}
-          busy={busy}
-          selectedRunId={selectedRunId}
-          onSelectRun={setSelectedRunId}
-          onNewRunDraft={handleNewRunDraft}
-          onNewGroup={handleNewGroup}
-          onRenameGroup={handleRenameGroup}
-          onInfer={handleInfer}
-          isRunChecked={isRunChecked}
-          isGroupChecked={isGroupChecked}
-          isProjectChecked={isProjectChecked}
-          toggleRun={toggleRun}
-          toggleGroup={toggleGroup}
-          toggleProject={toggleProject}
-        />
-        <NavResizer
-          width={view.navWidth}
-          onChange={(w) => updateView('navWidth', w)}
-          onReset={() => updateView('navWidth', DEFAULT_VIEW.navWidth)}
-        />
-        <main className="main">
-          {tab === 'train' ? (
-            <TrainPanel
-              runId={selectedRunId}
-              busy={busy}
-              onRunChanged={rescan}
-              onDeleted={() => {
-                setSelectedRunId(null);
-                rescan();
-              }}
-            />
-          ) : (
-            <ResultPanel runIds={selectedRunIds} tree={treeData} />
+          {busy && (
+            <span className="busy-badge">
+              GPU使用中{state?.active ? `: ${state.active.run_id} (${state.active.kind})` : ''}
+            </span>
           )}
-        </main>
+        </header>
+        {actionError && (
+          <div className="error-banner clickable" onClick={() => setActionError(null)}>
+            {actionError}（クリックで閉じる）
+          </div>
+        )}
+        <div className="layout">
+          <Tree
+            tree={treeData}
+            mode={tab}
+            busy={busy}
+            selectedRunId={selectedRunId}
+            onSelectRun={setSelectedRunId}
+            onNewRunDraft={handleNewRunDraft}
+            onNewGroup={handleNewGroup}
+            onRenameGroup={handleRenameGroup}
+            onInfer={handleInfer}
+            isRunChecked={isRunChecked}
+            isGroupChecked={isGroupChecked}
+            isProjectChecked={isProjectChecked}
+            toggleRun={toggleRun}
+            toggleGroup={toggleGroup}
+            toggleProject={toggleProject}
+          />
+          <NavResizer
+            width={view.navWidth}
+            onChange={(w) => updateView('navWidth', w)}
+            onReset={() => updateView('navWidth', DEFAULT_VIEW.navWidth)}
+          />
+          <main className="main">
+            {tab === 'train' ? (
+              <TrainPanel
+                runId={selectedRunId}
+                busy={busy}
+                onRunChanged={rescan}
+                onDeleted={() => {
+                  setSelectedRunId(null);
+                  rescan();
+                }}
+              />
+            ) : (
+              <ResultPanel runIds={selectedRunIds} tree={treeData} />
+            )}
+          </main>
+        </div>
       </div>
-    </div>
+    </ViewContext.Provider>
   );
 }

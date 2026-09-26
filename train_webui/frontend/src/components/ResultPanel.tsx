@@ -121,6 +121,7 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
         label: l.label,
         // 画像は run ごとに、送られた全て（infer を何回か実行していればその全部）を新しい順に縦に並べる
         wide: true,
+        resize: 'image' as const,
         content: (
           <div className="image-list">
             {runIds.flatMap((id) => {
