@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { waitUntilVisible } from '../hooks/visibility';
 import type { ImageResult, LabelInfo, MetricResult, Plot, ProjectNode, Result } from '../api';
 import { MetricChart } from './MetricChart';
 import { PlotChart, mergePlots } from './PlotChart';
@@ -11,10 +12,14 @@ interface RunMeta {
   project: string;
   group: string;
   displayName: string;
+  status: string;
 }
 
 // Result タブ: チェックONのrunを横断してラベルごとに比較表示する（design.md §9）。
-export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectNode[] }) {
+// 動いていない run の結果を確認し直す間隔（CLI から手で infer した結果などを拾うため、止めはしない）
+const IDLE_REFRESH_MS = 60000;
+
+export function ResultPanel({ runIds, tree, activeRunId }: { runIds: string[]; tree: ProjectNode[]; activeRunId: string | null }) {
   const [labels, setLabels] = useState<LabelInfo[]>([]);
   // ラベルの表示・非表示は再読み込みしても残す
   const [selectedLabels, setSelectedLabels] = usePersistentState<Record<string, boolean>>('selectedLabels', {});
@@ -27,17 +32,26 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
   const runMetaMap = useMemo(() => {
     const map: Record<string, RunMeta> = {};
     tree.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => {
-      map[r.run_id] = { project: p.project, group: g.group_name, displayName: r.display_name };
+      map[r.run_id] = { project: p.project, group: g.group_name, displayName: r.display_name, status: r.status };
     })));
     return map;
   }, [tree]);
 
   const key = runIds.slice().sort().join(',');
 
+  // 学習中・infer 中の run だけ3秒ごとに取り直し、それ以外は最初に1回取ったら IDLE_REFRESH_MS ごとに確認するだけにする。
+  // 読み込みループの中から最新の値を見るため ref に持つ
+  const liveRef = useRef<(id: string) => boolean>(() => true);
+  liveRef.current = (id: string) => id === activeRunId || runMetaMap[id]?.status === 'running';
+  const lastFetchedRef = useRef<Record<string, number>>({});
+  const wasLiveRef = useRef<Record<string, boolean>>({});
+
   useEffect(() => {
     // 比較対象runが変わったら軸つきグラフは取り直す
     plotsRef.current = {};
     setPlotsByRun({});
+    lastFetchedRef.current = {};
+    wasLiveRef.current = {};
     if (runIds.length === 0) {
       setLabels([]);
       setResultsByRun({});
@@ -46,7 +60,19 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
     let cancelled = false;
     let timer: number | undefined;
     const load = async () => {
+      await waitUntilVisible(); // タブが裏にある間は取りに行かない
+      if (cancelled) return;
       try {
+        const now = Date.now();
+        const due = runIds.filter((id) => {
+          const live = liveRef.current(id);
+          // 動いていた run が止まった直後は、最後の結果を拾うためにもう1回取る
+          const justStopped = wasLiveRef.current[id] && !live;
+          wasLiveRef.current[id] = live;
+          const last = lastFetchedRef.current[id];
+          return live || justStopped || last === undefined || now - last >= IDLE_REFRESH_MS;
+        });
+        if (due.length === 0) return;
         const ls = await api.getLabels(runIds);
         if (cancelled) return;
         setLabels(ls);
@@ -57,10 +83,17 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
           });
           return next;
         });
-        const entries = await Promise.all(runIds.map(async (id) => [id, await api.getResults(id)] as const));
+        const entries = await Promise.all(due.map(async (id) => [id, await api.getResults(id)] as const));
         if (cancelled) return;
-        setResultsByRun(Object.fromEntries(entries));
-        const plotEntries = await Promise.all(runIds.map(async (id) => {
+        setResultsByRun((prev) => {
+          // 比較から外れた run の分は捨て、今回取った run の分だけ置き換える
+          const next: Record<string, Result[]> = {};
+          runIds.forEach((id) => {
+            if (prev[id]) next[id] = prev[id];
+          });
+          return { ...next, ...Object.fromEntries(entries) };
+        });
+        const plotEntries = await Promise.all(due.map(async (id) => {
           const prev = plotsRef.current[id];
           // 点のidはrun内で通し番号なので、全ラベルの最大の last_point_id 以降を取れば差分になる
           const ids = (prev ?? []).map((p) => p.last_point_id).filter((v): v is number => v !== null);
@@ -68,8 +101,11 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
           return [id, mergePlots(prev, await api.getPlots(id, afterId))] as const;
         }));
         if (cancelled) return;
-        plotsRef.current = Object.fromEntries(plotEntries);
+        plotsRef.current = { ...plotsRef.current, ...Object.fromEntries(plotEntries) };
         setPlotsByRun(plotsRef.current);
+        due.forEach((id) => {
+          lastFetchedRef.current[id] = now;
+        });
         setError(null);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));

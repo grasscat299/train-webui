@@ -6,6 +6,8 @@ import binascii
 import ipaddress
 import math
 import shutil
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -308,13 +310,26 @@ def create_app(
                 f"しきい値 {threshold:g} MiB）",
             )
 
+    # project の検出はリポジトリ全体を走査して main.py を解析するので重い（数十ms）。frontend は数秒ごとに
+    # ツリーを取りに来るため、結果を project_scan_interval_sec だけ使い回す。「再スキャン」は即時に探し直す。
+    scan_lock = threading.Lock()
+    scan_cache: dict = {"at": None, "projects": []}
+
+    def get_projects(force: bool = False) -> list[str]:
+        with scan_lock:
+            at = scan_cache["at"]
+            if force or at is None or time.monotonic() - at >= settings.project_scan_interval_sec:
+                scan_cache["projects"] = discovery.discover_projects(settings.repo_root)
+                scan_cache["at"] = time.monotonic()
+            return list(scan_cache["projects"])
+
     @app.get("/api/tree")
     def get_tree() -> list[dict]:
-        return _build_tree(db, settings)
+        return _build_tree(db, get_projects())
 
     @app.post("/api/rescan")
     def rescan() -> list[dict]:
-        return _build_tree(db, settings)
+        return _build_tree(db, get_projects(force=True))
 
     @app.get("/api/state")
     def get_state() -> dict:
@@ -323,8 +338,8 @@ def create_app(
 
     @app.post("/api/runs/draft")
     def create_draft(body: DraftRequest) -> dict:
-        projects = discovery.discover_projects(settings.repo_root)
-        if body.project not in projects:
+        # 使い回している一覧に無ければ、新しく作られた project かもしれないので探し直してから判定する
+        if body.project not in get_projects() and body.project not in get_projects(force=True):
             raise HTTPException(404, "project が見つかりません")
         if body.new_group:
             group = body.group or new_group_id(exists=lambda g: db.group_exists(body.project, g))
@@ -576,8 +591,7 @@ def create_app(
     return app
 
 
-def _build_tree(db: Database, settings: Settings) -> list[dict]:
-    projects = discovery.discover_projects(settings.repo_root)
+def _build_tree(db: Database, projects: list[str]) -> list[dict]:
     tree = []
     for project in projects:
         runs = db.list_runs_by_project(project)  # created_at 降順

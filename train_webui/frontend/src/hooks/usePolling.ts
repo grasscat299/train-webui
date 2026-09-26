@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { waitUntilVisible } from './visibility';
 
 // 一定間隔でfetcherを呼び続け、結果をstateに反映する汎用フック。
 // GET /api/tree, /api/state のような定期ポーリング（design.md/CONTRACT.md §2.2）に使う。
@@ -12,6 +13,8 @@ export function usePolling<T>(fetcher: () => Promise<T>, intervalMs: number, dep
     let cancelled = false;
     let timer: number | undefined;
     const tick = async () => {
+      await waitUntilVisible(); // タブが裏にある間は取りに行かない
+      if (cancelled) return;
       try {
         const result = await fetcherRef.current();
         if (!cancelled) {

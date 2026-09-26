@@ -44,6 +44,8 @@ class Settings:
     repo_root: Path
     # 起動前チェック: 自分たち以外が学習用PCのGPUメモリをこれより多く使っていたら起動しない（design.md §4）
     gpu_busy_threshold_mib: float = 1024.0
+    # project の検出（main.py の AST 解析を含むリポジトリ全体の走査）結果を使い回す秒数。0 なら毎回探す
+    project_scan_interval_sec: float = 30.0
 
 
 def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
@@ -60,6 +62,7 @@ def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
         sync_exclude=list(raw["sync"]["exclude"]),
         repo_root=repo_root,
         gpu_busy_threshold_mib=float(raw.get("gpu", {}).get("busy_threshold_mib", 1024)),
+        project_scan_interval_sec=float(raw.get("log", {}).get("project_scan_interval_sec", 30)),
     )
 
 

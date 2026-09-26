@@ -89,3 +89,26 @@ def test_draft_new_group_copies_latest_non_draft_in_project(app_factory):
     body = resp.json()
     assert 'marker = "cross"' in body["config_toml"]
     assert 'group = "g_new"' in body["config_toml"]
+
+
+def test_tree_reuses_project_scan_until_rescan(app_factory):
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "proj_a")
+    client = TestClient(app)
+    assert [p["project"] for p in client.get("/api/tree").json()] == ["proj_a"]
+
+    # 走査結果を使い回している間は、新しい project はツリーに出ない
+    write_project(settings.repo_root, "proj_b")
+    assert [p["project"] for p in client.get("/api/tree").json()] == ["proj_a"]
+    # 「再スキャン」はすぐ探し直す
+    assert [p["project"] for p in client.post("/api/rescan").json()] == ["proj_a", "proj_b"]
+
+
+def test_draft_for_new_project_rescans(app_factory):
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "proj_a")
+    client = TestClient(app)
+    client.get("/api/tree")
+    write_project(settings.repo_root, "proj_c")
+    resp = client.post("/api/runs/draft", json={"project": "proj_c", "new_group": True})
+    assert resp.status_code == 200

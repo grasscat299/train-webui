@@ -506,6 +506,16 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
     続けるため、取得のたびに**間引き済みの系列全体を取り直して置き換える**。
   - 拡大して細部を見たい場合に元の点を取りに行く機能（表示範囲だけ取り直す）は今回は持たない（§11）。
 
+## 9.4 自動更新の頻度（負荷を抑える）
+
+- ブラウザのタブが裏にある間は、どの自動更新（ツリー・状態・Train/Result の結果・ログ）も止め、表に戻ったら再開する。
+- Result タブは、学習中・infer 中の run（`status=running` か `/api/state` の active）だけ3秒ごとに結果を取り直す。
+  それ以外の run は最初に1回取ったら60秒ごとに確認するだけにする（CLI から手で infer した結果も拾えるように、
+  止めはしない）。動いていた run が止まった直後は最後の結果を拾うためにもう1回取る。
+- Train タブは、学習・infer が動いていない run は30秒ごとの確認にする（動いている間は1.5秒ごと）。
+- backend の project 検出（リポジトリ全体の走査と main.py の AST 解析、数十ms）は結果を30秒使い回す
+  （`server.toml` の `[log] project_scan_interval_sec`）。「再スキャン」と、一覧に無い project での draft 作成時は即時に探し直す。
+
 ## 9.5 結果を CLI で読む（Claude と相談する用）
 
 - `venv/bin/python -m train_webui.cli {ls,show,plot,compare}`（`train_webui/cli.py`）。DB と画像フォルダを

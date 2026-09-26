@@ -204,7 +204,7 @@ export default function App() {
                 }}
               />
             ) : (
-              <ResultPanel runIds={selectedRunIds} tree={treeData} />
+              <ResultPanel runIds={selectedRunIds} tree={treeData} activeRunId={state?.active?.run_id ?? null} />
             )}
           </main>
           {/* 閉じている時も出しておき、左へドラッグすれば開き直せる（幅0から広げる扱い） */}

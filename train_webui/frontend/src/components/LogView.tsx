@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { waitUntilVisible } from '../hooks/visibility';
 
 // run.log の差分取得（offset方式、CONTRACT.md §2.2 GET /api/jobs/{job_id}/log）を
 // 1.5秒間隔でポーリングし、doneになったら止める。終了済みjobの全文取得にも使える。
@@ -14,6 +15,8 @@ export function LogView({ jobId }: { jobId: string }) {
     let offset = 0;
     setText('');
     const load = async () => {
+      await waitUntilVisible();
+      if (cancelled) return;
       try {
         const res = await api.getJobLog(jobId, offset);
         if (cancelled) return;

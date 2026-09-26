@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { waitUntilVisible } from '../hooks/visibility';
 import type { ImageResult, MetricResult, Plot, Result, Run } from '../api';
 import { LogView } from './LogView';
 import { MetricChart } from './MetricChart';
@@ -44,6 +45,8 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
     let cancelled = false;
     let timer: number | undefined;
     const tick = async () => {
+      await waitUntilVisible();
+      if (cancelled) return;
       try {
         const r = await api.getRun(runId);
         if (cancelled) return;
@@ -59,7 +62,8 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
         plotsRef.current = nextPlots;
         setPlots(nextPlots);
         const live = r.status === 'running' || r.jobs.some((j) => j.kind === 'infer' && j.status === 'running');
-        timer = window.setTimeout(tick, live ? 1500 : 5000);
+        // 学習・infer が動いていない run は結果が増えないので、たまに確認するだけにする
+        timer = window.setTimeout(tick, live ? 1500 : 30000);
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
