@@ -21,6 +21,12 @@ def new_run_id(exists: Callable[[str], bool], now: datetime | None = None) -> st
     return _with_suffix(base, exists)
 
 
+def new_group_id(exists: Callable[[str], bool], now: datetime | None = None) -> str:
+    """g + YYYYMMDD_HHMMSS。config の [wandb].group と checkpoint 名（model_{group_id}.pt）に使う固定のID。"""
+    now = now or datetime.now()
+    return _with_suffix(now.strftime("g%Y%m%d_%H%M%S"), exists)
+
+
 def new_job_id(run_id: str, kind: str, exists: Callable[[str], bool], now: datetime | None = None) -> str:
     """<run_id>__<kind>__<HHMMSS>。衝突したら _2, _3 ... を付ける。"""
     now = now or datetime.now()

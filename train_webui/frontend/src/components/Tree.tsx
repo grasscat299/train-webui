@@ -10,6 +10,7 @@ export interface TreeProps {
   onSelectRun: (runId: string) => void;
   onNewRunDraft: (project: string, group: string) => void;
   onNewGroup: (project: string) => void;
+  onRenameGroup: (project: string, group: string, current: string) => void;
   onInfer: (project: string, group: string) => void;
   isRunChecked: (runId: string) => boolean;
   isGroupChecked: (project: string, group: string, runs: RunSummary[]) => boolean;
@@ -30,7 +31,7 @@ export function Tree(props: TreeProps) {
   );
 }
 
-function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onNewGroup, onInfer,
+function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onNewGroup, onRenameGroup, onInfer,
   isRunChecked, isGroupChecked, isProjectChecked, toggleRun, toggleGroup, toggleProject }: { node: ProjectNode } & TreeProps) {
   const [open, setOpen] = useState(true);
   return (
@@ -59,6 +60,7 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
               selectedRunId={selectedRunId}
               onSelectRun={onSelectRun}
               onNewRunDraft={onNewRunDraft}
+              onRenameGroup={onRenameGroup}
               onInfer={onInfer}
               isRunChecked={isRunChecked}
               isGroupChecked={isGroupChecked}
@@ -75,7 +77,7 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
   );
 }
 
-function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onInfer,
+function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onRenameGroup, onInfer,
   isRunChecked, isGroupChecked, toggleRun, toggleGroup }: {
   project: string;
   node: GroupNode;
@@ -84,6 +86,7 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
   selectedRunId: string | null;
   onSelectRun: (runId: string) => void;
   onNewRunDraft: (project: string, group: string) => void;
+  onRenameGroup: (project: string, group: string, current: string) => void;
   onInfer: (project: string, group: string) => void;
   isRunChecked: (runId: string) => boolean;
   isGroupChecked: (project: string, group: string, runs: RunSummary[]) => boolean;
@@ -103,7 +106,12 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
             onChange={(on) => toggleGroup(project, node.group, node.runs, on)}
           />
         )}
-        <span className="tree-group-name">{node.group}</span>
+        <span className="tree-group-name" title={`group_id: ${node.group}`}>
+          {node.group_name}
+        </span>
+        <button className="tree-rename" title="group名を変更" onClick={() => onRenameGroup(project, node.group, node.group_name)}>
+          ✎
+        </button>
         {/* Train / Result どちらのタブでも group 単位で infer を起動できる（結果は Result タブに自動で反映される） */}
         <button className="infer-btn" disabled={busy} onClick={() => onInfer(project, node.group)} title="model_{group}.pt で推論を実行">
           [infer]

@@ -72,14 +72,24 @@ export default function App() {
     }
   };
 
+  // group_id / group_name は backend が自動で振る（名前は後からツリーの ✎ で変えられる）
   const handleNewGroup = async (project: string) => {
-    const name = window.prompt('新しいgroup名を入力してください');
-    if (!name) return;
     try {
-      const run = await api.createDraft(project, name, true);
+      const run = await api.createDraft(project, null, true);
       await rescan();
       setSelectedRunId(run.run_id);
       setTab('train');
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleRenameGroup = async (project: string, group: string, current: string) => {
+    const name = window.prompt('group名を入力してください（checkpoint名などに使う group_id は変わりません）', current);
+    if (name === null || !name.trim() || name.trim() === current) return;
+    try {
+      await api.renameGroup(project, group, name.trim());
+      await rescan();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e));
     }
@@ -129,6 +139,7 @@ export default function App() {
           onSelectRun={setSelectedRunId}
           onNewRunDraft={handleNewRunDraft}
           onNewGroup={handleNewGroup}
+          onRenameGroup={handleRenameGroup}
           onInfer={handleInfer}
           isRunChecked={isRunChecked}
           isGroupChecked={isGroupChecked}

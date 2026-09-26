@@ -25,7 +25,7 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
   const runMetaMap = useMemo(() => {
     const map: Record<string, RunMeta> = {};
     tree.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => {
-      map[r.run_id] = { project: p.project, group: g.group, displayName: r.display_name };
+      map[r.run_id] = { project: p.project, group: g.group_name, displayName: r.display_name };
     })));
     return map;
   }, [tree]);

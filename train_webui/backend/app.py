@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from . import discovery
 from .db import Database, now_iso
 from .decimate import decimate_minmax, decimate_stride
-from .ids import new_run_id
+from .ids import new_group_id, new_run_id
 from .jobs import JobBusyError, JobManager
 from .remote.types import RemoteControllerProtocol
 from .settings import Settings
@@ -45,8 +45,16 @@ def _is_allowed_client(host: str | None, networks: list) -> bool:
 
 class DraftRequest(BaseModel):
     project: str
-    group: str
+    # 既存groupへの追加なら group_id。新規group（new_group=true）で省略すると group_id / group_name を自動で振る
+    group: str | None = None
     new_group: bool
+    group_name: str | None = None
+
+
+class GroupRenameRequest(BaseModel):
+    project: str
+    group: str  # group_id
+    group_name: str
 
 
 class ConfigRequest(BaseModel):
@@ -102,10 +110,10 @@ class ResultsRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # DB行 -> レスポンスJSON（CONTRACT.md §2.1）
 
-def _run_summary(row: dict) -> dict:
+def _run_summary(row: dict, group_name: str | None = None) -> dict:
     return {
         "run_id": row["run_id"], "display_name": row["display_name"],
-        "project": row["project"], "group": row["run_group"],
+        "project": row["project"], "group": row["run_group"], "group_name": group_name or row["run_group"],
         "origin": row["origin"], "status": row["status"],
         "created_at": row["created_at"], "started_at": row["started_at"], "ended_at": row["ended_at"],
     }
@@ -120,7 +128,7 @@ def _job_public(row: dict) -> dict:
 
 
 def _run_detail(db: Database, row: dict) -> dict:
-    detail = _run_summary(row)
+    detail = _run_summary(row, db.group_names(row["project"]).get(row["run_group"]))
     detail.update({
         "config_toml": row["config_toml"], "git_commit": row["git_commit"], "git_diff": row["git_diff"],
         "git_untracked": row["git_untracked"], "git_info_source": row["git_info_source"],
@@ -313,20 +321,38 @@ def create_app(
         projects = discovery.discover_projects(settings.repo_root)
         if body.project not in projects:
             raise HTTPException(404, "project が見つかりません")
+        if body.new_group:
+            group = body.group or new_group_id(exists=lambda g: db.group_exists(body.project, g))
+            group_name = (body.group_name or "").strip() or db.next_group_name(body.project)
+        elif body.group:
+            group, group_name = body.group, None
+        else:
+            raise HTTPException(400, "既存groupへの追加では group（group_id）が必要です")
         try:
-            config_toml = _build_draft_config(db, settings, body.project, body.group, body.new_group)
+            config_toml = _build_draft_config(db, settings, body.project, group, body.new_group)
         except TomlValidationError as e:
             raise HTTPException(400, str(e)) from e
+        db.ensure_group(body.project, group, group_name)
         run_id = new_run_id(exists=lambda r: r in db.list_run_ids())
         now = now_iso()
         db.create_run(
-            run_id=run_id, project=body.project, run_group=body.group,
-            display_name=db.next_display_name(body.project, body.group), origin="webui", status="draft",
+            run_id=run_id, project=body.project, run_group=group,
+            display_name=db.next_display_name(body.project, group), origin="webui", status="draft",
             config_toml=config_toml, git_commit=None, git_diff=None, git_untracked=None,
             git_info_source=None, created_at=now, started_at=None, ended_at=None,
             last_heartbeat_at=None, hostname=None, pid=None, exit_code=None, error=None,
         )
         return _run_detail(db, db.get_run(run_id))
+
+    @app.put("/api/groups")
+    def rename_group(body: GroupRenameRequest) -> dict:
+        name = body.group_name.strip()
+        if not name:
+            raise HTTPException(400, "group_name が空です")
+        if not db.group_exists(body.project, body.group):
+            raise HTTPException(404, "group が見つかりません")
+        db.rename_group(body.project, body.group, name)
+        return {"project": body.project, "group": body.group, "group_name": name}
 
     @app.get("/api/runs/resolve")
     def resolve_run(project: str, group: str) -> dict:
@@ -353,6 +379,7 @@ def create_app(
             group = extract_group(body.config_toml)
         except TomlValidationError as e:
             raise HTTPException(400, str(e)) from e
+        db.ensure_group(run["project"], group)  # config で未登録の group_id に書き換えられたら、その group を作る
         fields: dict = {"config_toml": body.config_toml, "run_group": group}
         if group != run["run_group"]:  # 別groupに移ったら、そのgroupでの次の番号を振り直す
             fields["display_name"] = db.next_display_name(run["project"], group)
@@ -455,6 +482,7 @@ def create_app(
         run_id = new_run_id(exists=lambda r: r in db.list_run_ids())
         last_sync = db.get_last_sync()
         now = now_iso()
+        db.ensure_group(body.project, body.group)
         db.create_run(
             run_id=run_id, project=body.project, run_group=body.group,
             display_name=db.next_display_name(body.project, body.group), origin="cli", status="running",
@@ -541,7 +569,11 @@ def _build_tree(db: Database, settings: Settings) -> list[dict]:
         runs = db.list_runs_by_project(project)  # created_at 降順
         groups: dict[str, list[dict]] = {}
         for r in runs:
-            groups.setdefault(r["run_group"], []).append(_run_summary(r))
-        group_list = [{"group": g, "runs": groups[g]} for g in sorted(groups)]
+            groups.setdefault(r["run_group"], []).append(r)
+        names = db.group_names(project)
+        group_list = [
+            {"group": g, "group_name": names.get(g, g), "runs": [_run_summary(r, names.get(g)) for r in groups[g]]}
+            for g in sorted(groups, key=lambda g: names.get(g, g))
+        ]
         tree.append({"project": project, "groups": group_list})
     return tree

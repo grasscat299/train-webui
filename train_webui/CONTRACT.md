@@ -51,7 +51,7 @@ train_webui/
 
 ```jsonc
 // RunSummary
-{"run_id": "20260925_143012", "display_name": "v3", "project": "src/world_model_v1", "group": "wm_v1_d128_L6",
+{"run_id": "20260925_143012", "display_name": "v3", "project": "src/world_model_v1", "group": "wm_v1_d128_L6", "group_name": "wm_v1_d128_L6",
  "origin": "webui", "status": "running",
  "created_at": "...", "started_at": "..." | null, "ended_at": "..." | null}
 
@@ -87,10 +87,11 @@ train_webui/
 
 | メソッド・パス | 内容 |
 |---|---|
-| `GET /api/tree` | `[{"project": str, "groups": [{"group": str, "runs": [RunSummary]}]}]`。検出した全project（runが無いものも `groups: []` で含む）。projectはパス順、groupは名前順、runは `created_at` 新しい順 |
+| `GET /api/tree` | `[{"project": str, "groups": [{"group": str, "group_name": str, "runs": [RunSummary]}]}]`（`group` は group_id）。検出した全project（runが無いものも `groups: []` で含む）。projectはパス順、groupは group_name 順、runは `created_at` 新しい順 |
 | `POST /api/rescan` | project検出をやり直す。`GET /api/tree` と同じ形を返す |
 | `GET /api/state` | `{"busy": bool, "active": {"run_id", "job_id" \| null, "kind", "origin"} \| null}`。GPU使用中か（webuiのjobが running、または cli の run が running） |
-| `POST /api/runs/draft` | body `{"project": str, "group": str, "new_group": bool}`。§3（design.md）の規則で初期configを決めて draft を作る。`new_group=true` なら `[wandb].group` の値を `group` に書き換える。返り値 Run |
+| `POST /api/runs/draft` | body `{"project": str, "group": str \| null, "new_group": bool, "group_name": str \| null}`。§3（design.md）の規則で初期configを決めて draft を作る。既存groupへの追加では `group`（group_id）必須。`new_group=true` で `group` 省略なら group_id（`g<YYYYMMDD_HHMMSS>`）と group_name（`group_name` 省略時 `group1`, `group2`, ...）を自動で振り、`[wandb].group` を group_id に書き換える。返り値 Run |
+| `PUT /api/groups` | body `{"project": str, "group": str, "group_name": str}`。group の表示名だけを変える（group_id・config は変えない）。空なら400、group が無ければ404。返り値 `{"project", "group", "group_name"}` |
 | `GET /api/runs/{run_id}` | Run |
 | `PUT /api/runs/{run_id}/config` | body `{"config_toml": str}`。draftのみ（それ以外409）。TOMLとして不正なら400。`[wandb].group` が変わっていればgroupも更新。返り値 Run |
 | `POST /api/runs/{run_id}/start` | draft を起動（コード同期→config書き込み→trainジョブ起動）。busyなら409。学習用PCのGPUを他の人が使用中なら409、確認できなければ502（design.md §4。どちらも draft のまま）。返り値 Run（同期・起動は裏で進み、失敗したら run は failed・`error` に理由） |

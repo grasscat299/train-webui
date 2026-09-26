@@ -134,7 +134,14 @@ WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマ�
     `config.example.toml`）をそのままコピーして初期値にする
 - 下書きはUI上のテキストエディタでTOMLとして直接編集する（保存時にパースしてエラーを弾く）。
 - **draft はDBに保存**され、ツリーにも表示される（ブラウザを閉じても残る）。
-- **groupは config の `[wandb].group` の値で決まる**。エディタでこの値を書き換えた場合は、保存時に
+- **group は group_id と group_name を持つ**。group_id は config の `[wandb].group` の値で、checkpoint 名
+  （`model_{group_id}.pt`）にも使われるので一度決めたら変えない。group_name は画面（ツリー・凡例）に出す表示名で、
+  ツリーの ✎ からいつでも編集できる（DB の `groups` テーブル。group_id は変わらない）。
+  - 「+ 新規group」では名前を聞かず、group_id を `g<YYYYMMDD_HHMMSS>`、group_name を project 内の連番
+    `group1`, `group2`, ... で自動で振る。
+  - CLI の `init(new_run=True)` や config の書き換えで未登録の group_id が現れた場合は、group_name = group_id で登録する。
+    既存DBの group も group_name = group_id で移行する。
+- **groupは config の `[wandb].group` の値（= group_id）で決まる**。エディタでこの値を書き換えた場合は、保存時に
   その値のgroupへ分類し直す（存在しないgroup名なら新しいgroupになる）。
 - 起動時、WebUI backendは①下書き内容をそのrunのconfigスナップショットとして確定し、②同じ内容を
   学習用PC上のプロジェクトディレクトリの `config.toml` に書き込んでから実行する。`config.toml`

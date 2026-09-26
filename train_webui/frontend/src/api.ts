@@ -10,7 +10,8 @@ export interface RunSummary {
   run_id: string;
   display_name: string; // group 内で作成順に振られる表示名（v1, v2, ...）
   project: string;
-  group: string;
+  group: string; // group_id（config の [wandb].group・checkpoint 名 model_{group_id}.pt に使う固定のID）
+  group_name: string; // group の表示名（編集できる）
   origin: Origin;
   status: RunStatus;
   created_at: string;
@@ -93,7 +94,8 @@ export interface Plot {
 }
 
 export interface GroupNode {
-  group: string;
+  group: string; // group_id
+  group_name: string;
   runs: RunSummary[];
 }
 
@@ -138,7 +140,9 @@ export interface Api {
   getTree(): Promise<ProjectNode[]>;
   rescan(): Promise<ProjectNode[]>;
   getState(): Promise<StateResp>;
-  createDraft(project: string, group: string, newGroup: boolean): Promise<Run>;
+  // newGroup=true なら group は不要（group_id と group_name は backend が自動で振る）
+  createDraft(project: string, group: string | null, newGroup: boolean): Promise<Run>;
+  renameGroup(project: string, group: string, groupName: string): Promise<void>;
   getRun(runId: string): Promise<Run>;
   updateConfig(runId: string, configToml: string): Promise<Run>;
   startRun(runId: string): Promise<Run>;
@@ -178,6 +182,11 @@ const realApi: Api = {
     request<Run>('/api/runs/draft', {
       method: 'POST',
       body: JSON.stringify({ project, group, new_group: newGroup }),
+    }),
+  renameGroup: (project, group, groupName) =>
+    request<void>('/api/groups', {
+      method: 'PUT',
+      body: JSON.stringify({ project, group, group_name: groupName }),
     }),
   getRun: (runId) => request<Run>(`/api/runs/${encodeURIComponent(runId)}`),
   updateConfig: (runId, configToml) =>

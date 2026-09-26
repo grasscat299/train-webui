@@ -17,7 +17,12 @@ import type {
   Plot,
 } from './api';
 
-type StoredRun = Omit<Run, 'jobs'>;
+type StoredRun = Omit<Run, 'jobs' | 'group_name'>;
+
+// group の表示名（backend の groups テーブル相当）。未登録の group は group_id をそのまま表示名にする
+const groupNames = new Map<string, string>();
+const groupKeyOf = (project: string, group: string) => `${project}\u0000${group}`;
+const groupNameOf = (project: string, group: string) => groupNames.get(groupKeyOf(project, group)) ?? group;
 
 let seq = 0;
 function nextId(): number {
@@ -174,7 +179,7 @@ function getOrThrow(runId: string): StoredRun {
 }
 
 function cloneRun(run: StoredRun): Run {
-  return { ...run, jobs: (jobsByRun.get(run.run_id) ?? []).slice() };
+  return { ...run, group_name: groupNameOf(run.project, run.group), jobs: (jobsByRun.get(run.run_id) ?? []).slice() };
 }
 
 function toSummary(run: StoredRun): RunSummary {
@@ -183,6 +188,7 @@ function toSummary(run: StoredRun): RunSummary {
     display_name: run.display_name,
     project: run.project,
     group: run.group,
+    group_name: groupNameOf(run.project, run.group),
     origin: run.origin,
     status: run.status,
     created_at: run.created_at,
@@ -222,9 +228,10 @@ function buildTree(): ProjectNode[] {
     .map((project) => {
       const groupMap = projects.get(project)!;
       const groups: GroupNode[] = Array.from(groupMap.keys())
-        .sort()
+        .sort((a, b) => groupNameOf(project, a).localeCompare(groupNameOf(project, b)))
         .map((g) => ({
           group: g,
+          group_name: groupNameOf(project, g),
           runs: groupMap.get(g)!.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)),
         }));
       return { project, groups };
@@ -531,8 +538,17 @@ async function getState(): Promise<StateResp> {
   return computeState();
 }
 
-async function createDraft(project: string, group: string, newGroup: boolean): Promise<Run> {
+async function createDraft(project: string, groupArg: string | null, newGroup: boolean): Promise<Run> {
   const runId = generateRunId();
+  let group = groupArg ?? '';
+  if (newGroup) {
+    // backend と同じく group_id は日時から、group_name は project 内の連番で自動で振る
+    group = `g${runId}`;
+    const used = new Set(Array.from(runs.values()).filter((r) => r.project === project).map((r) => groupNameOf(project, r.group)));
+    let n = 1;
+    while (used.has(`group${n}`)) n += 1;
+    groupNames.set(groupKeyOf(project, group), `group${n}`);
+  }
   const existingInGroup = Array.from(runs.values()).filter((r) => r.project === project && r.group === group && r.status !== 'draft');
   const existingInProject = Array.from(runs.values()).filter((r) => r.project === project && r.status !== 'draft');
   let baseConfig = SAMPLE_CONFIG;
@@ -702,11 +718,16 @@ async function getPlots(runId: string, afterId?: number | null): Promise<Plot[]>
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+async function renameGroup(project: string, group: string, groupName: string): Promise<void> {
+  groupNames.set(groupKeyOf(project, group), groupName.trim());
+}
+
 export const mockApi: Api = {
   getTree,
   rescan: getTree,
   getState,
   createDraft,
+  renameGroup,
   getRun,
   updateConfig,
   startRun,

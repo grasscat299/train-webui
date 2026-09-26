@@ -137,7 +137,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`run ${run.group} / ${run.display_name}（${run.run_id}）を削除します。よろしいですか？`)) return;
+    if (!window.confirm(`run ${run.group_name} / ${run.display_name}（${run.run_id}）を削除します。よろしいですか？`)) return;
     setSaving(true);
     try {
       await api.deleteRun(run.run_id);
@@ -180,7 +180,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
             {run.origin === 'cli' && <span className="cli-badge">CLI</span>}
           </div>
           <div className="meta">
-            {run.project} / {run.group} ・ <span className="run-id">{run.run_id}</span>
+            {run.project} / <span title={`group_id: ${run.group}`}>{run.group_name}</span> ・ <span className="run-id">{run.run_id}</span>
             {run.started_at && <> ・ 開始 {run.started_at}</>}
             {run.ended_at && <> ・ 終了 {run.ended_at}</>}
           </div>

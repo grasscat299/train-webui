@@ -129,6 +129,17 @@ button { font: inherit; color: inherit; }
 }
 .eye-toggle.on { color: var(--text); }
 .eye-toggle:hover { background: var(--bg); color: var(--accent); }
+.tree-rename {
+  border: none;
+  background: none;
+  color: #c1c7cf;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+  visibility: hidden;
+}
+.tree-group-row:hover .tree-rename { visibility: visible; }
+.tree-rename:hover { color: var(--accent); }
 .infer-btn {
   margin-left: auto;
   font-size: 11px;

@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS results (
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_run_id ON jobs(run_id);
+
+-- group の表示名。group_id（= runs.run_group = config の [wandb].group）は固定で、group_name だけ編集できる
+CREATE TABLE IF NOT EXISTS groups (
+    project TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    group_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project, group_id)
+);
 CREATE INDEX IF NOT EXISTS idx_results_run_id ON results(run_id);
 
 CREATE TABLE IF NOT EXISTS plots (
@@ -134,6 +143,11 @@ class Database:
             for r in rows:
                 name = self._next_display_name(conn, r["project"], r["run_group"])
                 conn.execute("UPDATE runs SET display_name = ? WHERE run_id = ?", (name, r["run_id"]))
+            # groups 追加前のDBの移行: run にある group を、今の名前をそのまま group_name にして登録する
+            conn.execute(
+                "INSERT OR IGNORE INTO groups (project, group_id, group_name, created_at) "
+                "SELECT project, run_group, run_group, MIN(created_at) FROM runs GROUP BY project, run_group"
+            )
 
     @staticmethod
     def _next_display_name(conn: sqlite3.Connection, project: str, group: str) -> str:
@@ -148,6 +162,43 @@ class Database:
         """group 内で次に振る表示名（v1, v2, ...）= 今ある最大の番号 + 1。途中の番号が削除で空いても詰めない（既存runの表示名を変えないため）。"""
         with self._connect() as conn:
             return self._next_display_name(conn, project, group)
+
+    # ---- groups --------------------------------------------------------
+
+    def ensure_group(self, project: str, group_id: str, group_name: str | None = None) -> None:
+        """group が未登録なら登録する（group_name 省略時は group_id と同じ）。登録済みなら何もしない。"""
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO groups (project, group_id, group_name, created_at) VALUES (?, ?, ?, ?)",
+                (project, group_id, group_name or group_id, now_iso()),
+            )
+
+    def group_exists(self, project: str, group_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM groups WHERE project = ? AND group_id = ?", (project, group_id),
+            ).fetchone()
+        return row is not None
+
+    def group_names(self, project: str) -> dict[str, str]:
+        """{group_id: group_name}"""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT group_id, group_name FROM groups WHERE project = ?", (project,)).fetchall()
+        return {r["group_id"]: r["group_name"] for r in rows}
+
+    def rename_group(self, project: str, group_id: str, group_name: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE groups SET group_name = ? WHERE project = ? AND group_id = ?", (group_name, project, group_id),
+            )
+
+    def next_group_name(self, project: str) -> str:
+        """新規groupの既定の表示名（group1, group2, ...）。project 内で使われていない最小の番号。"""
+        used = set(self.group_names(project).values())
+        n = 1
+        while f"group{n}" in used:
+            n += 1
+        return f"group{n}"
 
     # ---- runs ----------------------------------------------------------
 
