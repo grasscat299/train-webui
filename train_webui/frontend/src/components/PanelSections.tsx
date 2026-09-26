@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { usePersistentState } from '../hooks/usePersistentState';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { useView } from '../viewSettings';
 
@@ -19,7 +19,8 @@ function sectionOf(label: string): string {
 
 // wandb 風の表示: ラベルの接頭辞ごとに折りたたみ可能なセクションを作り、その中にパネルをグリッドで並べる。
 export function PanelSections({ items }: { items: PanelItem[] }) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // セクションの開閉は再読み込みしても残す
+  const [collapsed, setCollapsed] = usePersistentState<Record<string, boolean>>('collapsedSections', {});
   const { view, update } = useView();
 
   // corner: 右下の角（幅と高さ）、right: 右辺（幅だけ）

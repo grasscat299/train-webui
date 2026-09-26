@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import type { GroupNode, ProjectNode, RunSummary, StateResp } from './api';
 import { usePolling } from './hooks/usePolling';
+import { usePersistentState } from './hooks/usePersistentState';
 import { Tree } from './components/Tree';
 import { TrainPanel } from './components/TrainPanel';
 import { ResultPanel } from './components/ResultPanel';
@@ -13,17 +14,26 @@ type Tab = 'train' | 'result';
 
 export default function App() {
   const { view, update: updateView, reset: resetView } = useViewSettings();
-  const [tab, setTab] = useState<Tab>('train');
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [runChecked, setRunChecked] = useState<Record<string, boolean>>({});
-  const [groupChecked, setGroupChecked] = useState<Record<string, boolean>>({});
-  const [projectChecked, setProjectChecked] = useState<Record<string, boolean>>({});
+  // 開いていたタブ・選んでいた run・Result の比較対象は、再読み込みしてもそのまま残す
+  const [tab, setTab] = usePersistentState<Tab>('tab', 'train');
+  const [selectedRunId, setSelectedRunId] = usePersistentState<string | null>('selectedRunId', null);
+  const [runChecked, setRunChecked] = usePersistentState<Record<string, boolean>>('runChecked', {});
+  const [groupChecked, setGroupChecked] = usePersistentState<Record<string, boolean>>('groupChecked', {});
+  const [projectChecked, setProjectChecked] = usePersistentState<Record<string, boolean>>('projectChecked', {});
   const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: tree, setData: setTree } = usePolling<ProjectNode[]>(() => api.getTree(), 2500, []);
   const { data: state } = usePolling<StateResp>(() => api.getState(), 2500, []);
   const busy = state?.busy ?? false;
   const treeData = tree ?? [];
+
+  // 保存していた run が削除されていたら選択を外す（ツリーを取得できてから判定する）
+  useEffect(() => {
+    if (tree === null || tree === undefined || selectedRunId === null) return;
+    const exists = tree.some((p) => p.groups.some((g) => g.runs.some((r) => r.run_id === selectedRunId)));
+    if (!exists) setSelectedRunId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tree]);
 
   const rescan = async () => {
     const t = await api.rescan();

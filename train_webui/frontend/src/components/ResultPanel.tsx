@@ -5,6 +5,7 @@ import { MetricChart } from './MetricChart';
 import { PlotChart, mergePlots } from './PlotChart';
 import { PanelSections } from './PanelSections';
 import type { PanelItem } from './PanelSections';
+import { usePersistentState } from '../hooks/usePersistentState';
 
 interface RunMeta {
   project: string;
@@ -15,7 +16,8 @@ interface RunMeta {
 // Result タブ: チェックONのrunを横断してラベルごとに比較表示する（design.md §9）。
 export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectNode[] }) {
   const [labels, setLabels] = useState<LabelInfo[]>([]);
-  const [selectedLabels, setSelectedLabels] = useState<Record<string, boolean>>({});
+  // ラベルの表示・非表示は再読み込みしても残す
+  const [selectedLabels, setSelectedLabels] = usePersistentState<Record<string, boolean>>('selectedLabels', {});
   const [resultsByRun, setResultsByRun] = useState<Record<string, Result[]>>({});
   const [plotsByRun, setPlotsByRun] = useState<Record<string, Plot[]>>({});
   // 差分取得用: runごとの手元の Plot（ポーリング中に最新を参照するため ref に持つ）

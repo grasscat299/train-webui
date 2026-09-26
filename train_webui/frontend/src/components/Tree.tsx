@@ -1,6 +1,6 @@
-import { useState } from 'react';
 import type { GroupNode, ProjectNode, RunSummary } from '../api';
 import { EyeToggle } from './EyeToggle';
+import { usePersistentState } from '../hooks/usePersistentState';
 import { ChevronIcon, IconButton, PencilIcon, PlayIcon, PlusIcon } from './Icons';
 
 export interface TreeProps {
@@ -34,7 +34,7 @@ export function Tree(props: TreeProps) {
 
 function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onNewGroup, onRenameGroup, onInfer,
   isRunChecked, isGroupChecked, isProjectChecked, toggleRun, toggleGroup, toggleProject }: { node: ProjectNode } & TreeProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = usePersistentState(`treeOpen.${node.project}`, true);
   return (
     <div className="tree-project">
       <div className="tree-row tree-project-row">
@@ -96,7 +96,7 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
   toggleRun: (runId: string, val: boolean) => void;
   toggleGroup: (project: string, group: string, runs: RunSummary[], val: boolean) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = usePersistentState(`treeOpen.${project}\u0000${node.group}`, true);
   return (
     <div className="tree-group">
       <div className="tree-row tree-group-row">
