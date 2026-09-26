@@ -119,26 +119,39 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
       }
       return {
         label: l.label,
-        wide: runIds.length > 1,
+        // 画像は run ごとに、送られた全て（infer を何回か実行していればその全部）を新しい順に縦に並べる
+        wide: true,
         content: (
-          <div className="image-row">
-            {runIds.map((id) => {
-              const imgs = (resultsByRun[id] ?? []).filter(
-                (r): r is ImageResult => r.kind === 'image' && r.label === l.label,
-              );
-              const latest = imgs.slice().sort((a, b) => a.sent_at.localeCompare(b.sent_at)).at(-1);
-              return (
-                <div key={id} className="image-cell">
-                  <div className="image-cell-title">{runLabel(id)}</div>
-                  {latest ? (
-                    <a href={latest.image_url} target="_blank" rel="noreferrer" title="クリックで元の大きさで開く">
-                      <img src={latest.image_url} alt={l.label} />
-                    </a>
-                  ) : (
+          <div className="image-list">
+            {runIds.flatMap((id) => {
+              const imgs = (resultsByRun[id] ?? [])
+                .filter((r): r is ImageResult => r.kind === 'image' && r.label === l.label)
+                .sort((a, b) => b.sent_at.localeCompare(a.sent_at));
+              if (imgs.length === 0) {
+                return [
+                  <div key={id} className="image-item">
+                    <div className="image-item-title">
+                      <span className="image-item-run">{runLabel(id)}</span>
+                    </div>
                     <div className="no-image">画像なし</div>
-                  )}
+                  </div>,
+                ];
+              }
+              return imgs.map((img, i) => (
+                <div key={img.id} className="image-item">
+                  <div className="image-item-title">
+                    <span className="image-item-run">{runLabel(id)}</span>
+                    <span>
+                      {img.source} ・ {img.sent_at.replace('T', ' ').slice(0, 19)}
+                      {img.step !== null && <> ・ step {img.step}</>}
+                      {imgs.length > 1 && <> ・ {imgs.length - i}/{imgs.length}</>}
+                    </span>
+                  </div>
+                  <a href={img.image_url} target="_blank" rel="noreferrer" title="クリックで元の大きさで開く">
+                    <img src={img.image_url} alt={l.label} />
+                  </a>
                 </div>
-              );
+              ));
             })}
           </div>
         ),

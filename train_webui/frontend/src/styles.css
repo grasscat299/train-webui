@@ -346,10 +346,12 @@ details.block:not([open]) > .block-title { margin-bottom: 0; }
 }
 .image-viewer-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
 .no-image { color: var(--muted); font-size: 12px; padding: 16px; border: 1px dashed var(--border); border-radius: 6px; text-align: center; }
-.image-row { display: flex; flex-wrap: wrap; gap: 12px; }
-.image-cell { flex: 1 1 360px; min-width: 0; }
-.image-cell img { max-width: 100%; border-radius: 4px; display: block; }
-.image-cell-title { font-size: 11px; color: var(--muted); margin-bottom: 4px; font-family: var(--mono); }
+.image-list { display: flex; flex-direction: column; gap: 16px; }
+.image-item { min-width: 0; }
+.image-item + .image-item { border-top: 1px solid var(--border); padding-top: 12px; }
+.image-item-title { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.image-item-run { font-weight: 600; color: var(--text); font-size: 12px; }
+.image-item img { max-width: 100%; border-radius: 4px; display: block; }
 
 /* Result タブのラベル切り替え */
 .label-checks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
