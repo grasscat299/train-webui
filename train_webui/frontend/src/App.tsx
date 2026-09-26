@@ -5,10 +5,14 @@ import { usePolling } from './hooks/usePolling';
 import { Tree } from './components/Tree';
 import { TrainPanel } from './components/TrainPanel';
 import { ResultPanel } from './components/ResultPanel';
+import { NavResizer } from './components/NavResizer';
+import { ViewSettingsMenu } from './components/ViewSettingsMenu';
+import { DEFAULT_VIEW, useViewSettings, viewStyle } from './viewSettings';
 
 type Tab = 'train' | 'result';
 
 export default function App() {
+  const { view, update: updateView, reset: resetView } = useViewSettings();
   const [tab, setTab] = useState<Tab>('train');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runChecked, setRunChecked] = useState<Record<string, boolean>>({});
@@ -105,7 +109,7 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className="app" style={viewStyle(view)}>
       <header className="topbar">
         <h1>学習管理WebUI</h1>
         <nav className="tabs">
@@ -116,6 +120,7 @@ export default function App() {
             Result
           </button>
         </nav>
+        <ViewSettingsMenu view={view} onChange={updateView} onReset={resetView} />
         <button className="rescan" onClick={rescan}>
           再スキャン
         </button>
@@ -147,6 +152,11 @@ export default function App() {
           toggleRun={toggleRun}
           toggleGroup={toggleGroup}
           toggleProject={toggleProject}
+        />
+        <NavResizer
+          width={view.navWidth}
+          onChange={(w) => updateView('navWidth', w)}
+          onReset={() => updateView('navWidth', DEFAULT_VIEW.navWidth)}
         />
         <main className="main">
           {tab === 'train' ? (

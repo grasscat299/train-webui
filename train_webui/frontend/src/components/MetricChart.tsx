@@ -4,7 +4,7 @@ import type { MetricResult } from '../api';
 import { ScaleToggle } from './ScaleToggle';
 import type { AxisScale } from './ScaleToggle';
 
-import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE, niceLogDomain } from './chartStyle';
+import { CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE, niceLogDomain } from './chartStyle';
 
 export interface MetricSeries {
   runId: string;
@@ -26,30 +26,32 @@ export function MetricChart({ series }: { series: MetricSeries[] }) {
           <ScaleToggle axis="Y" value={yscale} onChange={setYscale} />
         </span>
       </div>
-      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-        <LineChart margin={CHART_MARGIN}>
-          <CartesianGrid stroke="var(--grid)" vertical={false} />
-          <XAxis dataKey="step" type="number" allowDuplicatedCategory={false} tick={TICK} />
-          <YAxis
-            tick={TICK}
-            scale={yscale}
-            domain={yscale === 'log' ? niceLogDomain(series.flatMap((s) => s.points.map((p) => p.value))) : ['auto', 'auto']}
-          />
-          <Tooltip contentStyle={TOOLTIP_STYLE} />
-          <Legend wrapperStyle={LEGEND_STYLE} iconSize={8} />
-          {series.map((s, i) => (
-            <Line
-              key={s.runId}
-              data={visible(s.points).map((p) => ({ step: p.step ?? 0, value: p.value }))}
-              dataKey="value"
-              name={s.label ?? s.runId}
-              stroke={COLORS[i % COLORS.length]}
-              dot={false}
-              isAnimationActive={false}
+      <div className="chart-box">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart margin={CHART_MARGIN}>
+            <CartesianGrid stroke="var(--grid)" vertical={false} />
+            <XAxis dataKey="step" type="number" allowDuplicatedCategory={false} tick={TICK} />
+            <YAxis
+              tick={TICK}
+              scale={yscale}
+              domain={yscale === 'log' ? niceLogDomain(series.flatMap((s) => s.points.map((p) => p.value))) : ['auto', 'auto']}
             />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Legend wrapperStyle={LEGEND_STYLE} iconSize={8} />
+            {series.map((s, i) => (
+              <Line
+                key={s.runId}
+                data={visible(s.points).map((p) => ({ step: p.step ?? 0, value: p.value }))}
+                dataKey="value"
+                name={s.label ?? s.runId}
+                stroke={COLORS[i % COLORS.length]}
+                dot={false}
+                isAnimationActive={false}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

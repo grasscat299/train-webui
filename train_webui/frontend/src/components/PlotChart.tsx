@@ -4,7 +4,7 @@ import type { Plot } from '../api';
 import { ScaleToggle } from './ScaleToggle';
 import type { AxisScale } from './ScaleToggle';
 
-import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE, niceLogDomain } from './chartStyle';
+import { CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE, niceLogDomain } from './chartStyle';
 
 export interface PlotEntry {
   runId: string;
@@ -81,53 +81,55 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
           <ScaleToggle axis="Y" value={yscale} onChange={setYOverride} />
         </span>
       </div>
-      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-        <ComposedChart margin={CHART_MARGIN}>
-          <CartesianGrid stroke="var(--grid)" vertical={false} />
-          <XAxis
-            dataKey="x"
-            type="number"
-            scale={scaleOf(xscale)}
-            domain={domainOf(def.xlim, xscale, lines.flatMap((l) => l.data.map((d) => d.x)))}
-            allowDataOverflow={def.xlim !== null}
-            tick={TICK}
-            label={def.xlabel ? { value: def.xlabel, position: 'insideBottom', offset: -4, style: TICK } : undefined}
-          />
-          <YAxis
-            dataKey="y"
-            type="number"
-            scale={scaleOf(yscale)}
-            domain={domainOf(def.ylim, yscale, lines.flatMap((l) => l.data.map((d) => d.y)))}
-            allowDataOverflow={def.ylim !== null}
-            tick={TICK}
-            label={def.ylabel ? { value: def.ylabel, angle: -90, position: 'insideLeft', style: TICK } : undefined}
-          />
-          <Tooltip contentStyle={TOOLTIP_STYLE} />
-          <Legend wrapperStyle={LEGEND_STYLE} iconSize={8} />
-          {lines.map((l, i) =>
-            def.kind === 'line' ? (
-              <Line
-                key={l.key}
-                data={l.data}
-                dataKey="y"
-                name={l.name}
-                stroke={COLORS[i % COLORS.length]}
-                dot={false}
-                isAnimationActive={false}
-              />
-            ) : (
-              <Scatter
-                key={l.key}
-                data={l.data}
-                dataKey="y"
-                name={l.name}
-                fill={COLORS[i % COLORS.length]}
-                isAnimationActive={false}
-              />
-            ),
-          )}
-        </ComposedChart>
-      </ResponsiveContainer>
+      <div className="chart-box">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart margin={CHART_MARGIN}>
+            <CartesianGrid stroke="var(--grid)" vertical={false} />
+            <XAxis
+              dataKey="x"
+              type="number"
+              scale={scaleOf(xscale)}
+              domain={domainOf(def.xlim, xscale, lines.flatMap((l) => l.data.map((d) => d.x)))}
+              allowDataOverflow={def.xlim !== null}
+              tick={TICK}
+              label={def.xlabel ? { value: def.xlabel, position: 'insideBottom', offset: -4, style: TICK } : undefined}
+            />
+            <YAxis
+              dataKey="y"
+              type="number"
+              scale={scaleOf(yscale)}
+              domain={domainOf(def.ylim, yscale, lines.flatMap((l) => l.data.map((d) => d.y)))}
+              allowDataOverflow={def.ylim !== null}
+              tick={TICK}
+              label={def.ylabel ? { value: def.ylabel, angle: -90, position: 'insideLeft', style: TICK } : undefined}
+            />
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Legend wrapperStyle={LEGEND_STYLE} iconSize={8} />
+            {lines.map((l, i) =>
+              def.kind === 'line' ? (
+                <Line
+                  key={l.key}
+                  data={l.data}
+                  dataKey="y"
+                  name={l.name}
+                  stroke={COLORS[i % COLORS.length]}
+                  dot={false}
+                  isAnimationActive={false}
+                />
+              ) : (
+                <Scatter
+                  key={l.key}
+                  data={l.data}
+                  dataKey="y"
+                  name={l.name}
+                  fill={COLORS[i % COLORS.length]}
+                  isAnimationActive={false}
+                />
+              ),
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
