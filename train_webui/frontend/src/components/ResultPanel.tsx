@@ -3,7 +3,6 @@ import { api } from '../api';
 import type { ImageResult, LabelInfo, MetricResult, Plot, ProjectNode, Result } from '../api';
 import { MetricChart } from './MetricChart';
 import { PlotChart, mergePlots } from './PlotChart';
-import { CommentBox } from './CommentBox';
 import { PanelSections } from './PanelSections';
 import type { PanelItem } from './PanelSections';
 import { usePersistentState } from '../hooks/usePersistentState';
@@ -12,13 +11,10 @@ interface RunMeta {
   project: string;
   group: string;
   displayName: string;
-  comment: string;
 }
 
 // Result タブ: チェックONのrunを横断してラベルごとに比較表示する（design.md §9）。
-export function ResultPanel({ runIds, tree, onRunChanged }: { runIds: string[]; tree: ProjectNode[]; onRunChanged: () => void }) {
-  // 比較中の run のコメント欄を開いているか（再読み込み後も残す）
-  const [commentsOpen, setCommentsOpen] = usePersistentState<boolean>('resultCommentsOpen', true);
+export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectNode[] }) {
   const [labels, setLabels] = useState<LabelInfo[]>([]);
   // ラベルの表示・非表示は再読み込みしても残す
   const [selectedLabels, setSelectedLabels] = usePersistentState<Record<string, boolean>>('selectedLabels', {});
@@ -31,7 +27,7 @@ export function ResultPanel({ runIds, tree, onRunChanged }: { runIds: string[]; 
   const runMetaMap = useMemo(() => {
     const map: Record<string, RunMeta> = {};
     tree.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => {
-      map[r.run_id] = { project: p.project, group: g.group_name, displayName: r.display_name, comment: r.comment };
+      map[r.run_id] = { project: p.project, group: g.group_name, displayName: r.display_name };
     })));
     return map;
   }, [tree]);
@@ -182,23 +178,6 @@ export function ResultPanel({ runIds, tree, onRunChanged }: { runIds: string[]; 
           );
         })}
       </div>
-      <section className="section">
-        <button className="section-header" onClick={() => setCommentsOpen(!commentsOpen)}>
-          <span className="section-caret">{commentsOpen ? '▾' : '▸'}</span>
-          <span className="section-name">コメント</span>
-          <span className="section-count">{runIds.length}</span>
-        </button>
-        {commentsOpen && (
-          <div className="comment-list">
-            {runIds.map((id) => (
-              <div key={id} className="comment-item">
-                <div className="comment-item-title">{runLabel(id)}</div>
-                <CommentBox runId={id} value={runMetaMap[id]?.comment ?? ''} onSaved={onRunChanged} />
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
       <PanelSections items={panelItems} />
     </div>
   );

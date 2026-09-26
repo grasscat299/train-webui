@@ -7,6 +7,8 @@ import { Tree } from './components/Tree';
 import { TrainPanel } from './components/TrainPanel';
 import { ResultPanel } from './components/ResultPanel';
 import { NavResizer } from './components/NavResizer';
+import { CommentSidebar } from './components/CommentSidebar';
+import type { SidebarRun } from './components/CommentSidebar';
 import { ViewSettingsMenu } from './components/ViewSettingsMenu';
 import type { Theme } from './components/ViewSettingsMenu';
 import { DEFAULT_VIEW, ViewContext, useViewSettings, viewStyle } from './viewSettings';
@@ -80,6 +82,17 @@ export default function App() {
     return ids;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [treeData, runChecked]);
+
+  // 右のコメント欄: Train タブでは選択中の run、Result タブでは比較中の run
+  const [commentsOpen, setCommentsOpen] = usePersistentState<boolean>('commentsOpen', true);
+  const sidebarRuns = useMemo<SidebarRun[]>(() => {
+    const byId = new Map<string, SidebarRun>();
+    treeData.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => {
+      byId.set(r.run_id, { runId: r.run_id, label: `${r.display_name} (${g.group_name})`, comment: r.comment });
+    })));
+    const ids = tab === 'train' ? (selectedRunId ? [selectedRunId] : []) : selectedRunIds;
+    return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+  }, [treeData, tab, selectedRunId, selectedRunIds]);
 
   const handleNewRunDraft = async (project: string, group: string) => {
     try {
@@ -188,9 +201,26 @@ export default function App() {
                 }}
               />
             ) : (
-              <ResultPanel runIds={selectedRunIds} tree={treeData} onRunChanged={rescan} />
+              <ResultPanel runIds={selectedRunIds} tree={treeData} />
             )}
           </main>
+          {commentsOpen && (
+            <NavResizer
+              width={view.commentWidth}
+              scale={view.uiScale / 100}
+              direction={-1}
+              title="ドラッグでコメント欄の幅を変更（ダブルクリックで元に戻す）"
+              onChange={(w) => updateView('commentWidth', w)}
+              onReset={() => updateView('commentWidth', DEFAULT_VIEW.commentWidth)}
+            />
+          )}
+          <CommentSidebar
+            open={commentsOpen}
+            onToggle={() => setCommentsOpen(!commentsOpen)}
+            runs={sidebarRuns}
+            emptyText={tab === 'train' ? '左のツリーで run を選ぶと、その run のコメントを書けます。' : '比較する run を目のアイコンで選ぶと、ここに並びます。'}
+            onSaved={rescan}
+          />
         </div>
       </div>
     </ViewContext.Provider>

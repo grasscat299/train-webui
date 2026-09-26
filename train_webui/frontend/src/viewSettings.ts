@@ -9,9 +9,10 @@ export interface ViewSettings {
   chartHeight: number; // px
   imageWidth: number; // px（画像の幅。画像のパネルはこの幅に合わせて伸び縮みする）
   uiScale: number; // %（画面全体の拡大率）
+  commentWidth: number; // px（右側のコメント欄の幅）
 }
 
-export const DEFAULT_VIEW: ViewSettings = { navWidth: 264, panelWidth: 380, chartHeight: 220, imageWidth: 720, uiScale: 120 };
+export const DEFAULT_VIEW: ViewSettings = { navWidth: 264, panelWidth: 380, chartHeight: 220, imageWidth: 720, uiScale: 120, commentWidth: 320 };
 
 export const VIEW_LIMITS: Record<keyof ViewSettings, { min: number; max: number; step: number }> = {
   navWidth: { min: 180, max: 640, step: 10 },
@@ -19,6 +20,7 @@ export const VIEW_LIMITS: Record<keyof ViewSettings, { min: number; max: number;
   chartHeight: { min: 140, max: 720, step: 20 },
   imageWidth: { min: 120, max: 2400, step: 20 },
   uiScale: { min: 70, max: 200, step: 5 },
+  commentWidth: { min: 200, max: 800, step: 10 },
 };
 
 const STORAGE_KEY = 'train_webui.view';
@@ -76,5 +78,6 @@ export function viewStyle(view: ViewSettings): CSSProperties {
     '--chart-height': `${view.chartHeight}px`,
     '--image-width': `${view.imageWidth}px`,
     '--ui-scale': view.uiScale / 100,
+    '--comment-width': `${view.commentWidth}px`,
   } as CSSProperties;
 }

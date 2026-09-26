@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { ImageResult, MetricResult, Plot, Result, Run } from '../api';
 import { LogView } from './LogView';
-import { CommentBox } from './CommentBox';
 import { MetricChart } from './MetricChart';
 import { ImageViewer } from './ImageViewer';
 import { PlotChart, mergePlots } from './PlotChart';
@@ -229,14 +228,6 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
       )}
       {configError && <div className="error-banner">{configError}</div>}
 
-      <CommentBox
-        runId={run.run_id}
-        value={run.comment}
-        onSaved={() => {
-          refresh();
-          onRunChanged();
-        }}
-      />
 
       {activeInferJob && (
         <div className="infer-banner">

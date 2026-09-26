@@ -5,6 +5,7 @@ import { VIEW_LIMITS } from '../viewSettings';
 const ROWS: { key: keyof ViewSettings; label: string; unit: string }[] = [
   { key: 'uiScale', label: '画面の大きさ', unit: '%' },
   { key: 'navWidth', label: 'ナビの幅', unit: 'px' },
+  { key: 'commentWidth', label: 'コメント欄の幅', unit: 'px' },
   { key: 'panelWidth', label: 'グラフの幅', unit: 'px' },
   { key: 'chartHeight', label: 'グラフの高さ', unit: 'px' },
   { key: 'imageWidth', label: '画像の幅（一括）', unit: 'px' },
