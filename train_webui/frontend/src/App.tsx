@@ -172,6 +172,7 @@ export default function App() {
           />
           <NavResizer
             width={view.navWidth}
+          scale={view.uiScale / 100}
             onChange={(w) => updateView('navWidth', w)}
             onReset={() => updateView('navWidth', DEFAULT_VIEW.navWidth)}
           />

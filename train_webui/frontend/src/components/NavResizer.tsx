@@ -1,10 +1,16 @@
 // ナビとメインの境目。ドラッグでナビの幅を変える（ダブルクリックで既定幅に戻す）。
-export function NavResizer({ width, onChange, onReset }: { width: number; onChange: (w: number) => void; onReset: () => void }) {
+// scale: 画面の大きさ（zoom）の倍率。マウスの移動量は画面上の px なので、倍率で割って拡大前の px に直す
+export function NavResizer({ width, scale, onChange, onReset }: {
+  width: number;
+  scale: number;
+  onChange: (w: number) => void;
+  onReset: () => void;
+}) {
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = width;
-    const move = (ev: PointerEvent) => onChange(startWidth + ev.clientX - startX);
+    const move = (ev: PointerEvent) => onChange(startWidth + (ev.clientX - startX) / scale);
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);

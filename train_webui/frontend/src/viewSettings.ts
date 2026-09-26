@@ -8,17 +8,17 @@ export interface ViewSettings {
   panelWidth: number; // px（グリッドの1パネルの最小幅）
   chartHeight: number; // px
   imageWidth: number; // px（画像の幅。画像のパネルはこの幅に合わせて伸び縮みする）
-  fontScale: number; // %（文字の大きさの倍率）
+  uiScale: number; // %（画面全体の拡大率）
 }
 
-export const DEFAULT_VIEW: ViewSettings = { navWidth: 264, panelWidth: 380, chartHeight: 220, imageWidth: 720, fontScale: 120 };
+export const DEFAULT_VIEW: ViewSettings = { navWidth: 264, panelWidth: 380, chartHeight: 220, imageWidth: 720, uiScale: 120 };
 
 export const VIEW_LIMITS: Record<keyof ViewSettings, { min: number; max: number; step: number }> = {
   navWidth: { min: 180, max: 640, step: 10 },
   panelWidth: { min: 240, max: 1400, step: 20 },
   chartHeight: { min: 140, max: 720, step: 20 },
   imageWidth: { min: 120, max: 2400, step: 20 },
-  fontScale: { min: 80, max: 180, step: 5 },
+  uiScale: { min: 70, max: 200, step: 5 },
 };
 
 const STORAGE_KEY = 'train_webui.view';
@@ -75,6 +75,6 @@ export function viewStyle(view: ViewSettings): CSSProperties {
     '--panel-width': `${view.panelWidth}px`,
     '--chart-height': `${view.chartHeight}px`,
     '--image-width': `${view.imageWidth}px`,
-    '--font-scale': view.fontScale / 100,
+    '--ui-scale': view.uiScale / 100,
   } as CSSProperties;
 }

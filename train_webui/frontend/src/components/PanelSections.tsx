@@ -30,12 +30,15 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
     const startX = e.clientX;
     const startY = e.clientY;
     const start = { ...view };
+    // 画面の大きさ（zoom）で拡大しているので、画面上の px を拡大前の px に直す
+    const scale = view.uiScale / 100;
+    const startPanelWidth = panel.width / scale;
     const move = (ev: PointerEvent) => {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
+      const dx = (ev.clientX - startX) / scale;
+      const dy = (ev.clientY - startY) / scale;
       if (mode === 'chart') {
         // グリッドの 1fr で最小幅より広がっていることがあるので、実際の幅を起点にする
-        update('panelWidth', panel.width + dx);
+        update('panelWidth', startPanelWidth + dx);
         if (handle === 'corner') update('chartHeight', start.chartHeight + dy);
       } else {
         update('imageWidth', start.imageWidth + dx);
