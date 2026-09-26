@@ -39,5 +39,5 @@ exclude = [
   "checkpoints/*", "samples/*", "config.toml",  # 中身だけ除外（ディレクトリ自体は作る。学習用PC側の中身は --delete でも消えない）
   "data/", "scratch/*/data/", "scratch/prts_survey/output/",
   "train_webui/data/", "train_webui/frontend/", "train_webui/server.toml",
-  ".claude/", ".dvc/", ".pytest_cache/", "logs/", "papers/", "textbooks/",
+  ".claude/", ".pytest_cache/", "logs/", "papers/", "textbooks/",
 ]

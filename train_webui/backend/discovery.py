@@ -12,7 +12,7 @@ DEFAULT_EXCLUDE_DIRS = {
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     "wandb", "node_modules",
     "train_webui",  # WebUI自身
-    ".claude", ".dvc",
+    ".claude",
 }
 
 REQUIRED_MODE_CHOICES = frozenset({"train", "infer"})
