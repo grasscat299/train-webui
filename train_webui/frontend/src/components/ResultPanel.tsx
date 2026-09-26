@@ -123,7 +123,7 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
         resize: 'image' as const,
         content: (
           <div className="image-list">
-            {/* run ごとにまとめ、run 名は最初に1回だけ書く。各画像には何枚目か・いつ送られたかだけ書く */}
+            {/* run ごとにまとめ、run 名は最初に1回だけ書く。各画像には何枚目か・送り元だけ書く */}
             {runIds.map((id) => {
               const imgs = (resultsByRun[id] ?? [])
                 .filter((r): r is ImageResult => r.kind === 'image' && r.label === l.label)
@@ -141,7 +141,7 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
                           </span>
                         )}
                         <span>
-                          {img.source} ・ {img.sent_at.replace('T', ' ').slice(0, 19)}
+                          {img.source}
                           {img.step !== null && <> ・ step {img.step}</>}
                         </span>
                       </div>
