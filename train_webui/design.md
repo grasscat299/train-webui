@@ -369,7 +369,7 @@ DVC（run管理機能・checkpoint/データ管理とも）は使わない。コ
 
 ## 6. データモデル（DB: sqlite）
 
-- `runs`: `run_id`, `project`, `group`, `origin`（webui / cli）,
+- `runs`: `run_id`, `display_name`（表示名。§7）, `project`, `group`, `origin`（webui / cli）,
   `status`（draft / running / finished / failed / stopped / lost）,
   `config_toml`, `git_commit`, `git_diff`, `git_untracked`, `git_info_source`（sync / last_sync）,
   `created_at`, `started_at`, `ended_at`, `last_heartbeat_at`（cliのみ）, `hostname`, `pid`,
@@ -406,6 +406,11 @@ groupはrunに付いた分類タグとして、ツリー上の見出しになっ
 ▶ scratch/PolylineInterp
 ```
 
+- **runの表示名**: `run_id`（timestamp）は長く見にくいので、画面上（ツリー・Trainタブの見出し・グラフの凡例）は
+  group 内で作成順に自動で振る表示名 `v1`, `v2`, ... で出す（`run_id` はツールチップ等で確認できる）。
+  run 作成時（draft作成・CLIの `init(new_run=True)`）に「その group で今ある最大の番号 + 1」を振ってDBに保存する。
+  途中の番号が削除で空いても詰めない（既存runの表示名は変わらない）。draft の `[wandb].group` を書き換えて
+  別 group に移った場合は、移った先の group で振り直す。Resultタブの凡例は group をまたぐので `v1 (group)` の形にする。
 - group内のrunは作成時刻の新しい順に並べる。各runには状態（draft / running / finished / failed /
   stopped / lost）をアイコン等で表示し、CLIから起動したrun（§5.2）には「CLI」バッジを付ける。
 - 「+ 新規run」「+ 新規group」の下書き作成・起動フローは §3 の通り。

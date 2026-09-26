@@ -84,7 +84,16 @@ const tickCounts = new Map<string, number>();
 const emptyProjects: string[] = [];
 let nextResultId = 1;
 
-function makeRun(run: StoredRun): StoredRun {
+// backend と同じく group 内の最大番号 + 1 で表示名を振る
+function nextDisplayName(project: string, group: string): string {
+  const used = Array.from(runs.values())
+    .filter((r) => r.project === project && r.group === group)
+    .map((r) => Number(r.display_name.slice(1)));
+  return `v${Math.max(0, ...used) + 1}`;
+}
+
+function makeRun(fields: Omit<StoredRun, 'display_name'>): StoredRun {
+  const run: StoredRun = { ...fields, display_name: nextDisplayName(fields.project, fields.group) };
   runs.set(run.run_id, run);
   if (!jobsByRun.has(run.run_id)) jobsByRun.set(run.run_id, []);
   if (!resultsByRun.has(run.run_id)) resultsByRun.set(run.run_id, []);
@@ -171,6 +180,7 @@ function cloneRun(run: StoredRun): Run {
 function toSummary(run: StoredRun): RunSummary {
   return {
     run_id: run.run_id,
+    display_name: run.display_name,
     project: run.project,
     group: run.group,
     origin: run.origin,
@@ -568,6 +578,7 @@ async function updateConfig(runId: string, configToml: string): Promise<Run> {
     throw new Error('TOMLとして不正です（[wandb].group が見つかりません）');
   }
   run.config_toml = configToml;
+  if (group !== run.group) run.display_name = nextDisplayName(run.project, group);
   run.group = group;
   return cloneRun(run);
 }

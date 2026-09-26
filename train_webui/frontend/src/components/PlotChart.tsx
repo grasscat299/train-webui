@@ -8,7 +8,7 @@ import { CHART_HEIGHT, CHART_MARGIN, COLORS, LEGEND_STYLE, TICK, TOOLTIP_STYLE, 
 
 export interface PlotEntry {
   runId: string;
-  runLabel: string; // 凡例用の "run_id (group)"
+  runLabel: string; // 凡例用の "表示名 (group)"
   plot: Plot;
 }
 

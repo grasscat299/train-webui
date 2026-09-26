@@ -51,7 +51,7 @@ train_webui/
 
 ```jsonc
 // RunSummary
-{"run_id": "20260925_143012", "project": "src/world_model_v1", "group": "wm_v1_d128_L6",
+{"run_id": "20260925_143012", "display_name": "v3", "project": "src/world_model_v1", "group": "wm_v1_d128_L6",
  "origin": "webui", "status": "running",
  "created_at": "...", "started_at": "..." | null, "ended_at": "..." | null}
 

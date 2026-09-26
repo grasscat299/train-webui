@@ -137,7 +137,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`run ${run.run_id} を削除します。よろしいですか？`)) return;
+    if (!window.confirm(`run ${run.group} / ${run.display_name}（${run.run_id}）を削除します。よろしいですか？`)) return;
     setSaving(true);
     try {
       await api.deleteRun(run.run_id);
@@ -152,13 +152,13 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
     ...plots.map((p) => ({
       label: p.label,
       subtitle: p.title,
-      content: <PlotChart entries={[{ runId: run.run_id, runLabel: run.run_id, plot: p }]} />,
+      content: <PlotChart entries={[{ runId: run.run_id, runLabel: run.display_name, plot: p }]} />,
     })),
     ...metricLabels.map((label) => ({
       label,
       content: (
         <MetricChart
-          series={[{ runId: run.run_id, points: results.filter((r): r is MetricResult => r.kind === 'metric' && r.label === label) }]}
+          series={[{ runId: run.run_id, label: run.display_name, points: results.filter((r): r is MetricResult => r.kind === 'metric' && r.label === label) }]}
         />
       ),
     })),
@@ -175,12 +175,12 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
       <div className="run-header">
         <div>
           <div className="run-title">
-            <h2>{run.run_id}</h2>
+            <h2 title={run.run_id}>{run.display_name}</h2>
             <span className={`status-pill status-${run.status}`}>{run.status}</span>
             {run.origin === 'cli' && <span className="cli-badge">CLI</span>}
           </div>
           <div className="meta">
-            {run.project} / {run.group}
+            {run.project} / {run.group} ・ <span className="run-id">{run.run_id}</span>
             {run.started_at && <> ・ 開始 {run.started_at}</>}
             {run.ended_at && <> ・ 終了 {run.ended_at}</>}
           </div>

@@ -9,6 +9,7 @@ import type { PanelItem } from './PanelSections';
 interface RunMeta {
   project: string;
   group: string;
+  displayName: string;
 }
 
 // Result タブ: チェックONのrunを横断してラベルごとに比較表示する（design.md §9）。
@@ -24,7 +25,7 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
   const runMetaMap = useMemo(() => {
     const map: Record<string, RunMeta> = {};
     tree.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => {
-      map[r.run_id] = { project: p.project, group: g.group };
+      map[r.run_id] = { project: p.project, group: g.group, displayName: r.display_name };
     })));
     return map;
   }, [tree]);
@@ -86,7 +87,8 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
     return <div className="panel-empty">左のツリーで比較対象のrunにチェックを入れてください。</div>;
   }
 
-  const runLabel = (id: string) => `${id} (${runMetaMap[id]?.group ?? '-'})`;
+  // 凡例・見出しは表示名で出す（v1 等は group 内でしか一意でないので group も添える）
+  const runLabel = (id: string) => `${runMetaMap[id]?.displayName ?? id} (${runMetaMap[id]?.group ?? '-'})`;
   const panelItems: PanelItem[] = labels
     .filter((l) => selectedLabels[l.label])
     .map((l) => {

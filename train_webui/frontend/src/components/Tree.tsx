@@ -120,7 +120,9 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
               )}
               <button className="tree-run-btn" onClick={() => onSelectRun(r.run_id)}>
                 <span className={`status-dot status-${r.status}`} title={r.status} />
-                <span className="run-id">{r.run_id}</span>
+                <span className="run-name" title={r.run_id}>
+                  {r.display_name}
+                </span>
                 {r.origin === 'cli' && <span className="cli-badge">CLI</span>}
               </button>
             </div>

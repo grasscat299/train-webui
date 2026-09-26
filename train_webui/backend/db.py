@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
     project TEXT NOT NULL,
     run_group TEXT NOT NULL,
+    display_name TEXT,
     origin TEXT NOT NULL,
     status TEXT NOT NULL,
     config_toml TEXT NOT NULL,
@@ -121,6 +123,31 @@ class Database:
     def init_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            # display_name 追加前に作られたDBの移行: 列を足し、既存runに group 内の作成順で v1, v2, ... を振る
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+            if "display_name" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN display_name TEXT")
+            rows = conn.execute(
+                "SELECT run_id, project, run_group FROM runs WHERE display_name IS NULL "
+                "ORDER BY created_at ASC, run_id ASC"
+            ).fetchall()
+            for r in rows:
+                name = self._next_display_name(conn, r["project"], r["run_group"])
+                conn.execute("UPDATE runs SET display_name = ? WHERE run_id = ?", (name, r["run_id"]))
+
+    @staticmethod
+    def _next_display_name(conn: sqlite3.Connection, project: str, group: str) -> str:
+        rows = conn.execute(
+            "SELECT display_name FROM runs WHERE project = ? AND run_group = ? AND display_name IS NOT NULL",
+            (project, group),
+        ).fetchall()
+        used = [int(r["display_name"][1:]) for r in rows if re.fullmatch(r"v\d+", r["display_name"])]
+        return f"v{max(used, default=0) + 1}"
+
+    def next_display_name(self, project: str, group: str) -> str:
+        """group 内で次に振る表示名（v1, v2, ...）= 今ある最大の番号 + 1。途中の番号が削除で空いても詰めない（既存runの表示名を変えないため）。"""
+        with self._connect() as conn:
+            return self._next_display_name(conn, project, group)
 
     # ---- runs ----------------------------------------------------------
 

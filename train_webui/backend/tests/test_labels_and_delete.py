@@ -100,3 +100,52 @@ def test_delete_finished_webui_run_removes_job_log(app_factory):
     resp = client.delete(f"/api/runs/{run['run_id']}")
     assert resp.status_code == 204
     assert not log_path.exists()
+
+
+def test_display_name_numbered_per_group(app_factory):
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "proj_a")
+    client = TestClient(app)
+    r1 = _create_cli_run(client, group="g1", pid=1)
+    r2 = _create_cli_run(client, group="g1", pid=2)
+    r3 = _create_cli_run(client, group="g2", pid=3)
+    tree = client.get("/api/tree").json()
+    names = {r["run_id"]: r["display_name"] for p in tree for g in p["groups"] for r in g["runs"]}
+    assert (names[r1], names[r2], names[r3]) == ("v1", "v2", "v1")
+
+    # 途中の番号が削除で空いても詰めない（既存runの表示名は変わらない）
+    client.post(f"/api/runs/{r1}/finish", json={"status": "finished", "error": None})
+    client.delete(f"/api/runs/{r1}")
+    draft = client.post("/api/runs/draft", json={"project": "proj_a", "group": "g1", "new_group": False}).json()
+    assert draft["display_name"] == "v3"
+    assert client.get(f"/api/runs/{r2}").json()["display_name"] == "v2"
+
+    # draft の group を変えたら移った先の group で振り直す
+    moved = client.put(f"/api/runs/{draft['run_id']}/config", json={"config_toml": '[wandb]\ngroup = "g2"\n'}).json()
+    assert moved["group"] == "g2" and moved["display_name"] == "v2"
+
+
+def test_display_name_backfilled_for_old_db(tmp_path):
+    import sqlite3
+
+    from train_webui.backend.db import Database
+
+    path = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE runs (run_id TEXT PRIMARY KEY, project TEXT NOT NULL, run_group TEXT NOT NULL, "
+        "origin TEXT NOT NULL, status TEXT NOT NULL, config_toml TEXT NOT NULL, git_commit TEXT, git_diff TEXT, "
+        "git_untracked TEXT, git_info_source TEXT, created_at TEXT NOT NULL, started_at TEXT, ended_at TEXT, "
+        "last_heartbeat_at TEXT, hostname TEXT, pid INTEGER, exit_code INTEGER, error TEXT)"
+    )
+    for run_id, group, created in [("b", "g1", "2026-01-02"), ("a", "g1", "2026-01-01"), ("c", "g2", "2026-01-03")]:
+        conn.execute(
+            "INSERT INTO runs (run_id, project, run_group, origin, status, config_toml, created_at) "
+            "VALUES (?, 'p', ?, 'webui', 'finished', '', ?)", (run_id, group, created),
+        )
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    db.init_schema()
+    assert [db.get_run(r)["display_name"] for r in ("a", "b", "c")] == ["v1", "v2", "v1"]

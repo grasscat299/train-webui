@@ -98,6 +98,7 @@ button { font: inherit; color: inherit; }
   width: 100%;
 }
 .run-id { font-family: var(--mono); font-size: 12px; }
+.run-name { font-weight: 500; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #adb5bd; }
 .status-dot.status-running { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .status-dot.status-finished { background: #2b8a3e; }
@@ -162,7 +163,7 @@ button { font: inherit; color: inherit; }
   margin-bottom: 12px;
 }
 .run-title { display: flex; align-items: center; gap: 10px; }
-.run-title h2 { margin: 0; font-size: 18px; font-family: var(--mono); font-weight: 600; }
+.run-title h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .meta { color: var(--muted); margin-top: 4px; }
 .status-pill {
   font-size: 11px;

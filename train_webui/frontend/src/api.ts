@@ -8,6 +8,7 @@ export type Origin = 'webui' | 'cli';
 
 export interface RunSummary {
   run_id: string;
+  display_name: string; // group 内で作成順に振られる表示名（v1, v2, ...）
   project: string;
   group: string;
   origin: Origin;

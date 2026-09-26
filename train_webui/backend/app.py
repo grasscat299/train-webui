@@ -104,7 +104,8 @@ class ResultsRequest(BaseModel):
 
 def _run_summary(row: dict) -> dict:
     return {
-        "run_id": row["run_id"], "project": row["project"], "group": row["run_group"],
+        "run_id": row["run_id"], "display_name": row["display_name"],
+        "project": row["project"], "group": row["run_group"],
         "origin": row["origin"], "status": row["status"],
         "created_at": row["created_at"], "started_at": row["started_at"], "ended_at": row["ended_at"],
     }
@@ -305,7 +306,8 @@ def create_app(
         run_id = new_run_id(exists=lambda r: r in db.list_run_ids())
         now = now_iso()
         db.create_run(
-            run_id=run_id, project=body.project, run_group=body.group, origin="webui", status="draft",
+            run_id=run_id, project=body.project, run_group=body.group,
+            display_name=db.next_display_name(body.project, body.group), origin="webui", status="draft",
             config_toml=config_toml, git_commit=None, git_diff=None, git_untracked=None,
             git_info_source=None, created_at=now, started_at=None, ended_at=None,
             last_heartbeat_at=None, hostname=None, pid=None, exit_code=None, error=None,
@@ -337,7 +339,10 @@ def create_app(
             group = extract_group(body.config_toml)
         except TomlValidationError as e:
             raise HTTPException(400, str(e)) from e
-        db.update_run(run_id, config_toml=body.config_toml, run_group=group)
+        fields: dict = {"config_toml": body.config_toml, "run_group": group}
+        if group != run["run_group"]:  # 別groupに移ったら、そのgroupでの次の番号を振り直す
+            fields["display_name"] = db.next_display_name(run["project"], group)
+        db.update_run(run_id, **fields)
         return _run_detail(db, db.get_run(run_id))
 
     @app.post("/api/runs/{run_id}/start")
@@ -435,7 +440,8 @@ def create_app(
         last_sync = db.get_last_sync()
         now = now_iso()
         db.create_run(
-            run_id=run_id, project=body.project, run_group=body.group, origin="cli", status="running",
+            run_id=run_id, project=body.project, run_group=body.group,
+            display_name=db.next_display_name(body.project, body.group), origin="cli", status="running",
             config_toml=body.config_toml,
             git_commit=last_sync["git_commit"] if last_sync else None,
             git_diff=last_sync["git_diff"] if last_sync else None,
