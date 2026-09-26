@@ -104,11 +104,10 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
           />
         )}
         <span className="tree-group-name">{node.group}</span>
-        {mode === 'train' && (
-          <button className="infer-btn" disabled={busy} onClick={() => onInfer(project, node.group)} title="model_{group}.pt で推論を実行">
-            [infer]
-          </button>
-        )}
+        {/* Train / Result どちらのタブでも group 単位で infer を起動できる（結果は Result タブに自動で反映される） */}
+        <button className="infer-btn" disabled={busy} onClick={() => onInfer(project, node.group)} title="model_{group}.pt で推論を実行">
+          [infer]
+        </button>
       </div>
       {open && (
         <div className="tree-children">
