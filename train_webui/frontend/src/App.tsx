@@ -15,6 +15,9 @@ import { DEFAULT_VIEW, ViewContext, useViewSettings, viewStyle } from './viewSet
 
 type Tab = 'train' | 'result';
 
+// コメント欄をこの幅（px）より狭くドラッグしたら閉じる
+const COMMENT_CLOSE_WIDTH = 140;
+
 export default function App() {
   const { view, update: updateView, reset: resetView } = useViewSettings();
   // 開いていたタブ・選んでいた run・Result の比較対象は、再読み込みしてもそのまま残す
@@ -204,16 +207,26 @@ export default function App() {
               <ResultPanel runIds={selectedRunIds} tree={treeData} />
             )}
           </main>
-          {commentsOpen && (
-            <NavResizer
-              width={view.commentWidth}
-              scale={view.uiScale / 100}
-              direction={-1}
-              title="ドラッグでコメント欄の幅を変更（ダブルクリックで元に戻す）"
-              onChange={(w) => updateView('commentWidth', w)}
-              onReset={() => updateView('commentWidth', DEFAULT_VIEW.commentWidth)}
-            />
-          )}
+          {/* 閉じている時も出しておき、左へドラッグすれば開き直せる（幅0から広げる扱い） */}
+          <NavResizer
+            width={commentsOpen ? view.commentWidth : 0}
+            scale={view.uiScale / 100}
+            direction={-1}
+            title="ドラッグでコメント欄の幅を変更。細くすると閉じ、閉じている時は左へドラッグで開く（ダブルクリックで元に戻す）"
+            onChange={(w) => {
+              // 一定の細さより狭くドラッグしたら閉じる。同じドラッグのまま広げ直せば開き直す
+              if (w < COMMENT_CLOSE_WIDTH) {
+                setCommentsOpen(false);
+              } else {
+                setCommentsOpen(true);
+                updateView('commentWidth', w);
+              }
+            }}
+            onReset={() => {
+              setCommentsOpen(true);
+              updateView('commentWidth', DEFAULT_VIEW.commentWidth);
+            }}
+          />
           <CommentSidebar
             open={commentsOpen}
             onToggle={() => setCommentsOpen(!commentsOpen)}
