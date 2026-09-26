@@ -123,35 +123,35 @@ export function ResultPanel({ runIds, tree }: { runIds: string[]; tree: ProjectN
         resize: 'image' as const,
         content: (
           <div className="image-list">
-            {runIds.flatMap((id) => {
+            {/* run ごとにまとめ、run 名は最初に1回だけ書く。各画像には何枚目か・いつ送られたかだけ書く */}
+            {runIds.map((id) => {
               const imgs = (resultsByRun[id] ?? [])
                 .filter((r): r is ImageResult => r.kind === 'image' && r.label === l.label)
                 .sort((a, b) => b.sent_at.localeCompare(a.sent_at));
-              if (imgs.length === 0) {
-                return [
-                  <div key={id} className="image-item">
-                    <div className="image-item-title">
-                      <span className="image-item-run">{runLabel(id)}</span>
+              return (
+                <div key={id} className="image-run">
+                  <div className="image-run-title">{runLabel(id)}</div>
+                  {imgs.length === 0 && <div className="no-image">画像なし</div>}
+                  {imgs.map((img, i) => (
+                    <div key={img.id} className="image-item">
+                      <div className="image-item-title">
+                        {imgs.length > 1 && (
+                          <span className="image-item-index">
+                            {imgs.length - i}/{imgs.length}
+                          </span>
+                        )}
+                        <span>
+                          {img.source} ・ {img.sent_at.replace('T', ' ').slice(0, 19)}
+                          {img.step !== null && <> ・ step {img.step}</>}
+                        </span>
+                      </div>
+                      <a href={img.image_url} target="_blank" rel="noreferrer" title="クリックで元の大きさで開く">
+                        <img src={img.image_url} alt={l.label} />
+                      </a>
                     </div>
-                    <div className="no-image">画像なし</div>
-                  </div>,
-                ];
-              }
-              return imgs.map((img, i) => (
-                <div key={img.id} className="image-item">
-                  <div className="image-item-title">
-                    <span className="image-item-run">{runLabel(id)}</span>
-                    <span>
-                      {img.source} ・ {img.sent_at.replace('T', ' ').slice(0, 19)}
-                      {img.step !== null && <> ・ step {img.step}</>}
-                      {imgs.length > 1 && <> ・ {imgs.length - i}/{imgs.length}</>}
-                    </span>
-                  </div>
-                  <a href={img.image_url} target="_blank" rel="noreferrer" title="クリックで元の大きさで開く">
-                    <img src={img.image_url} alt={l.label} />
-                  </a>
+                  ))}
                 </div>
-              ));
+              );
             })}
           </div>
         ),
