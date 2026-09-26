@@ -57,9 +57,11 @@ export function CommentBox({ runId, value, onSaved, placeholder }: {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') save();
         }}
       />
-      <div className="comment-status">
-        {error ? <span className="log-error">保存に失敗しました: {error}</span> : saving ? '保存中…' : dirty ? '未保存（欄の外をクリックか Ctrl+Enter で保存）' : ''}
-      </div>
+      {(error || saving || dirty) && (
+        <div className="comment-status">
+          {error ? <span className="log-error">保存に失敗しました: {error}</span> : saving ? '保存中…' : '未保存（欄の外をクリックか Ctrl+Enter で保存）'}
+        </div>
+      )}
     </div>
   );
 }
