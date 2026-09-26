@@ -149,3 +149,21 @@ def test_display_name_backfilled_for_old_db(tmp_path):
     db = Database(path)
     db.init_schema()
     assert [db.get_run(r)["display_name"] for r in ("a", "b", "c")] == ["v1", "v2", "v1"]
+
+
+def test_run_comment_editable_in_any_status(app_factory):
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "proj_a")
+    client = TestClient(app)
+    run_id = _create_cli_run(client)
+    assert client.get(f"/api/runs/{run_id}").json()["comment"] == ""
+
+    resp = client.put(f"/api/runs/{run_id}/comment", json={"comment": "lr を下げたら val が安定"})
+    assert resp.status_code == 200 and resp.json()["comment"] == "lr を下げたら val が安定"
+    client.post(f"/api/runs/{run_id}/finish", json={"status": "finished", "error": None})
+    assert client.put(f"/api/runs/{run_id}/comment", json={"comment": "終了後に追記"}).status_code == 200
+    # ツリーの RunSummary にも入る（Result タブの比較でも表示・編集するため）
+    tree = client.get("/api/tree").json()
+    summary = next(r for p in tree for g in p["groups"] for r in g["runs"] if r["run_id"] == run_id)
+    assert summary["comment"] == "終了後に追記"
+    assert client.put("/api/runs/nope/comment", json={"comment": "x"}).status_code == 404

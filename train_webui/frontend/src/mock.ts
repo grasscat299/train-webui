@@ -97,8 +97,8 @@ function nextDisplayName(project: string, group: string): string {
   return `v${Math.max(0, ...used) + 1}`;
 }
 
-function makeRun(fields: Omit<StoredRun, 'display_name'>): StoredRun {
-  const run: StoredRun = { ...fields, display_name: nextDisplayName(fields.project, fields.group) };
+function makeRun(fields: Omit<StoredRun, 'display_name' | 'comment'>): StoredRun {
+  const run: StoredRun = { ...fields, display_name: nextDisplayName(fields.project, fields.group), comment: '' };
   runs.set(run.run_id, run);
   if (!jobsByRun.has(run.run_id)) jobsByRun.set(run.run_id, []);
   if (!resultsByRun.has(run.run_id)) resultsByRun.set(run.run_id, []);
@@ -186,6 +186,7 @@ function toSummary(run: StoredRun): RunSummary {
   return {
     run_id: run.run_id,
     display_name: run.display_name,
+    comment: run.comment,
     project: run.project,
     group: run.group,
     group_name: groupNameOf(run.project, run.group),
@@ -718,6 +719,12 @@ async function getPlots(runId: string, afterId?: number | null): Promise<Plot[]>
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+async function updateComment(runId: string, comment: string): Promise<Run> {
+  const run = getOrThrow(runId);
+  run.comment = comment;
+  return cloneRun(run);
+}
+
 async function renameGroup(project: string, group: string, groupName: string): Promise<void> {
   groupNames.set(groupKeyOf(project, group), groupName.trim());
 }
@@ -728,6 +735,7 @@ export const mockApi: Api = {
   getState,
   createDraft,
   renameGroup,
+  updateComment,
   getRun,
   updateConfig,
   startRun,

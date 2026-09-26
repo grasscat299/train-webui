@@ -138,6 +138,11 @@ class Store:
 # 表示
 
 
+def _comment(run: sqlite3.Row) -> str:
+    # comment 列の追加前のDB（server 未再起動）でも動くようにする
+    return (run["comment"] if "comment" in run.keys() else "") or ""
+
+
 def _fmt(v: float) -> str:
     return f"{v:.6g}"
 
@@ -185,6 +190,10 @@ def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int) -
     print(f"# {_run_title(store, run)}")
     print(f"run_id: {run['run_id']}  status: {run['status']}  origin: {run['origin']}  group_id: {run['run_group']}")
     print(f"開始: {run['started_at'] or '-'}  終了: {run['ended_at'] or '-'}")
+    if _comment(run):
+        print("コメント:")
+        for line in _comment(run).splitlines():
+            print(f"  {line}")
     if run["error"]:
         err = run["error"].strip().splitlines()
         print("エラー（末尾）:")
@@ -274,6 +283,9 @@ def _last_values(store: Store, run: sqlite3.Row) -> dict[str, tuple[float, float
 def cmd_compare(store: Store, run1: sqlite3.Row, run2: sqlite3.Row) -> None:
     t1, t2 = _run_title(store, run1), _run_title(store, run2)
     print(f"# 比較\n  A: {t1}  ({run1['run_id']})\n  B: {t2}  ({run2['run_id']})")
+    for tag, run in (("A", run1), ("B", run2)):
+        if _comment(run):
+            print(f"  {tag} のコメント: " + _comment(run).replace("\n", " / "))
     print("\n## config の差分（A → B）")
     diff = _config_diff(run1["config_toml"], run2["config_toml"], "A", "B")
     print(diff if diff else "差分なし")

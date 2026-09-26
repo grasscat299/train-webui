@@ -12,6 +12,7 @@ export interface RunSummary {
   project: string;
   group: string; // group_id（config の [wandb].group・checkpoint 名 model_{group_id}.pt に使う固定のID）
   group_name: string; // group の表示名（編集できる）
+  comment: string; // run へのコメント（メモ）。いつでも編集できる
   origin: Origin;
   status: RunStatus;
   created_at: string;
@@ -143,6 +144,7 @@ export interface Api {
   // newGroup=true なら group は不要（group_id と group_name は backend が自動で振る）
   createDraft(project: string, group: string | null, newGroup: boolean): Promise<Run>;
   renameGroup(project: string, group: string, groupName: string): Promise<void>;
+  updateComment(runId: string, comment: string): Promise<Run>;
   getRun(runId: string): Promise<Run>;
   updateConfig(runId: string, configToml: string): Promise<Run>;
   startRun(runId: string): Promise<Run>;
@@ -182,6 +184,11 @@ const realApi: Api = {
     request<Run>('/api/runs/draft', {
       method: 'POST',
       body: JSON.stringify({ project, group, new_group: newGroup }),
+    }),
+  updateComment: (runId, comment) =>
+    request<Run>(`/api/runs/${encodeURIComponent(runId)}/comment`, {
+      method: 'PUT',
+      body: JSON.stringify({ comment }),
     }),
   renameGroup: (project, group, groupName) =>
     request<void>('/api/groups', {

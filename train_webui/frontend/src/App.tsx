@@ -188,7 +188,7 @@ export default function App() {
                 }}
               />
             ) : (
-              <ResultPanel runIds={selectedRunIds} tree={treeData} />
+              <ResultPanel runIds={selectedRunIds} tree={treeData} onRunChanged={rescan} />
             )}
           </main>
         </div>

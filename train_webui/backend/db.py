@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS runs (
     project TEXT NOT NULL,
     run_group TEXT NOT NULL,
     display_name TEXT,
+    comment TEXT NOT NULL DEFAULT '',
     origin TEXT NOT NULL,
     status TEXT NOT NULL,
     config_toml TEXT NOT NULL,
@@ -136,6 +137,8 @@ class Database:
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
             if "display_name" not in cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN display_name TEXT")
+            if "comment" not in cols:  # run へのコメント（メモ）。追加前のDBは空文字で移行
+                conn.execute("ALTER TABLE runs ADD COLUMN comment TEXT NOT NULL DEFAULT ''")
             rows = conn.execute(
                 "SELECT run_id, project, run_group FROM runs WHERE display_name IS NULL "
                 "ORDER BY created_at ASC, run_id ASC"

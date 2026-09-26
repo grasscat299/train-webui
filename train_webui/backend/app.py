@@ -61,6 +61,10 @@ class ConfigRequest(BaseModel):
     config_toml: str
 
 
+class CommentRequest(BaseModel):
+    comment: str
+
+
 class InferRequest(BaseModel):
     project: str
     group: str
@@ -116,6 +120,7 @@ def _run_summary(row: dict, group_name: str | None = None) -> dict:
         "project": row["project"], "group": row["run_group"], "group_name": group_name or row["run_group"],
         "origin": row["origin"], "status": row["status"],
         "created_at": row["created_at"], "started_at": row["started_at"], "ended_at": row["ended_at"],
+        "comment": row["comment"] or "",
     }
 
 
@@ -384,6 +389,15 @@ def create_app(
         if group != run["run_group"]:  # 別groupに移ったら、そのgroupでの次の番号を振り直す
             fields["display_name"] = db.next_display_name(run["project"], group)
         db.update_run(run_id, **fields)
+        return _run_detail(db, db.get_run(run_id))
+
+    @app.put("/api/runs/{run_id}/comment")
+    def update_comment(run_id: str, body: CommentRequest) -> dict:
+        """run へのコメント（メモ）。run の状態によらず（学習中・終了後でも）いつでも書き換えられる。"""
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        db.update_run(run_id, comment=body.comment)
         return _run_detail(db, db.get_run(run_id))
 
     @app.post("/api/runs/{run_id}/start")

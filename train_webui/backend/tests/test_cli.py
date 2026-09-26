@@ -30,6 +30,7 @@ def _setup(app_factory):
         client.post(f"/api/runs/{run_id}/finish", json={"status": "finished", "error": None})
         runs.append(run_id)
     client.put("/api/groups", json={"project": "src/proj_a", "group": "g1", "group_name": "小さいモデル"})
+    client.put(f"/api/runs/{runs[1]}/comment", json={"comment": "lr を 1e-4 に下げた"})
     return settings, runs
 
 
@@ -49,6 +50,7 @@ def test_ls_and_show(app_factory, capsys):
     assert "train: 3点" in out and "最小 (2, 0.2)" in out and "最後 (3, 0.3)" in out
     assert "train/lr" in out
     assert f"images/{runs[1]}/" in out
+    assert "lr を 1e-4 に下げた" in out
 
 
 def test_plot_and_compare(app_factory, capsys):
