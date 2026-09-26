@@ -6,7 +6,7 @@ const ROWS: { key: keyof ViewSettings; label: string; unit: string }[] = [
   { key: 'navWidth', label: 'ナビの幅', unit: 'px' },
   { key: 'panelWidth', label: 'グラフの幅', unit: 'px' },
   { key: 'chartHeight', label: 'グラフの高さ', unit: 'px' },
-  { key: 'imageWidth', label: '画像の幅（一括）', unit: '%' },
+  { key: 'imageWidth', label: '画像の幅（一括）', unit: 'px' },
 ];
 
 // 上部バーの「表示設定」: スライダーで大きさを変える。変更はすぐ全パネル・全画像に反映される。

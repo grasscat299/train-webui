@@ -36,7 +36,7 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
         update('panelWidth', panel.width + dx);
         update('chartHeight', start.chartHeight + dy);
       } else {
-        update('imageWidth', start.imageWidth + (dx / panel.width) * 100);
+        update('imageWidth', start.imageWidth + dx);
       }
     };
     const up = () => {
@@ -81,7 +81,10 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
             {!isCollapsed && (
               <div className="panel-grid">
                 {list.map((item) => (
-                  <div key={item.label} className={`panel${item.wide ? ' panel-wide' : ''}`}>
+                  <div
+                    key={item.label}
+                    className={`panel${item.wide ? ' panel-wide' : ''}${item.resize === 'image' ? ' panel-image' : ''}`}
+                  >
                     <div className="panel-title">
                       <span>{item.label}</span>
                       {item.subtitle && <span className="panel-subtitle">{item.subtitle}</span>}
