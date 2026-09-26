@@ -502,6 +502,16 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
     続けるため、取得のたびに**間引き済みの系列全体を取り直して置き換える**。
   - 拡大して細部を見たい場合に元の点を取りに行く機能（表示範囲だけ取り直す）は今回は持たない（§11）。
 
+## 9.5 結果を CLI で読む（Claude と相談する用）
+
+- `venv/bin/python -m train_webui.cli {ls,show,plot,compare}`（`train_webui/cli.py`）。DB と画像フォルダを
+  読み取り専用で直接読むので、server が止まっていても使え、何も書き込まない。
+- project はパスの末尾、group は group_name か group_id、run は表示名（v1, ...）か run_id で指定できる
+  （run 省略時は group で最後に起動した run）。
+- `show` は config（前の run からの差分）・グラフの要約（系列ごとの点数と最初・最小・最後）・画像のパス・ジョブを、
+  `plot` は1つのグラフを少ない点数に間引いた表を、`compare` は2つの run の config 差分と数値の表を出す。
+- 使い方は `train-webui-results` skill（~/.claude/skills）にまとめてある。
+
 ## 10. 決定事項メモ
 
 - 同時実行はシステム全体で1ジョブまで（train/infer問わず、projectをまたいでも1つ、GPU1台共有前提）。

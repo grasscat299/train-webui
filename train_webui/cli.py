@@ -1,0 +1,370 @@
+"""学習結果を CLI から読むための読み取り専用コマンド（Claude と結果を見ながら相談する用）。
+
+DB（train_webui/data/webui.sqlite）と画像フォルダを直接読むので、WebUI の server が止まっていても使える。
+何も書き込まない。リポジトリ直下から実行する:
+
+    venv/bin/python -m train_webui.cli ls [project]
+    venv/bin/python -m train_webui.cli show <project> <group> [run]
+    venv/bin/python -m train_webui.cli plot <project> <group> <label> [run] [--points 50]
+    venv/bin/python -m train_webui.cli compare <project> <group1> <group2> [--run1 v1] [--run2 v2]
+
+- project はパスの末尾だけでもよい（`world_model_v1` → `src/world_model_v1`）。
+- group は group_id でも group_name でもよい。
+- run は表示名（v1, v2, ...）か run_id。省略するとその group で最後に起動した（draft 以外の）run。
+"""
+from __future__ import annotations
+
+import argparse
+import difflib
+import sqlite3
+import sys
+from pathlib import Path
+
+from .backend.decimate import decimate_minmax, decimate_stride
+from .backend.settings import DEFAULT_PATH, REPO_ROOT, load_settings
+
+_DEFAULT_DB = REPO_ROOT / "train_webui" / "data" / "webui.sqlite"
+_DEFAULT_MEDIA = REPO_ROOT / "train_webui" / "data" / "media"
+
+
+class CliError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# DB の読み出し
+
+
+class Store:
+    def __init__(self, db_path: Path, media_dir: Path) -> None:
+        if not db_path.is_file():
+            raise CliError(f"DB がありません: {db_path}")
+        # 読み取り専用で開く（WebUI の server が動いていても邪魔しない）
+        self.conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        self.conn.row_factory = sqlite3.Row
+        self.media_dir = media_dir
+
+    def q(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+        return self.conn.execute(sql, params).fetchall()
+
+    def projects(self) -> list[str]:
+        return [r["project"] for r in self.q("SELECT DISTINCT project FROM runs ORDER BY project")]
+
+    def resolve_project(self, name: str) -> str:
+        projects = self.projects()
+        if name in projects:
+            return name
+        hits = [p for p in projects if p.endswith("/" + name.strip("/"))]
+        if len(hits) == 1:
+            return hits[0]
+        if not hits:
+            raise CliError(f"project が見つかりません: {name}（候補: {', '.join(projects)}）")
+        raise CliError(f"project が複数に当てはまります: {name} → {', '.join(hits)}")
+
+    def group_names(self, project: str) -> dict[str, str]:
+        rows = self.q("SELECT group_id, group_name FROM groups WHERE project = ?", (project,))
+        return {r["group_id"]: r["group_name"] for r in rows}
+
+    def resolve_group(self, project: str, name: str) -> str:
+        ids = [r["run_group"] for r in self.q("SELECT DISTINCT run_group FROM runs WHERE project = ?", (project,))]
+        if name in ids:
+            return name
+        names = self.group_names(project)
+        hits = [gid for gid in ids if names.get(gid) == name]
+        if len(hits) == 1:
+            return hits[0]
+        if not hits:
+            listing = ", ".join(f"{names.get(g, g)}({g})" for g in ids)
+            raise CliError(f"group が見つかりません: {name}（候補: {listing}）")
+        raise CliError(f"group_name が複数の group に当てはまります: {name} → {', '.join(hits)}（group_id で指定してください）")
+
+    def runs_in_group(self, project: str, group: str) -> list[sqlite3.Row]:
+        """作成順（古い順）"""
+        return self.q(
+            "SELECT * FROM runs WHERE project = ? AND run_group = ? ORDER BY created_at ASC, run_id ASC",
+            (project, group),
+        )
+
+    def resolve_run(self, project: str, group: str, name: str | None) -> sqlite3.Row:
+        runs = self.runs_in_group(project, group)
+        if name is None:
+            started = [r for r in runs if r["status"] != "draft"]
+            if not started:
+                raise CliError(f"{group} に起動済みの run がありません")
+            # 同じ秒に起動した run は run_id（同じ秒なら _2, _3 が付く）で後のものを選ぶ
+            return max(started, key=lambda r: (r["started_at"] or "", r["created_at"], r["run_id"]))
+        for r in runs:
+            if name in (r["display_name"], r["run_id"]):
+                return r
+        listing = ", ".join(f"{r['display_name']}({r['status']})" for r in runs)
+        raise CliError(f"run が見つかりません: {name}（候補: {listing}）")
+
+    def plots(self, run_id: str) -> list[sqlite3.Row]:
+        return self.q("SELECT * FROM plots WHERE run_id = ? ORDER BY label", (run_id,))
+
+    def series(self, run_id: str, label: str) -> dict[str, list[tuple[int, float, float]]]:
+        """{series名: [(id, x, y), ...]}（最初に現れた順、点は送信順）"""
+        out: dict[str, list[tuple[int, float, float]]] = {}
+        for r in self.q(
+            "SELECT id, series, x, y FROM plot_points WHERE run_id = ? AND label = ? ORDER BY id", (run_id, label),
+        ):
+            out.setdefault(r["series"], []).append((r["id"], r["x"], r["y"]))
+        return out
+
+    def metrics(self, run_id: str) -> dict[str, list[tuple[int, float]]]:
+        """{label: [(step, value), ...]}（送信順）"""
+        out: dict[str, list[tuple[int, float]]] = {}
+        for r in self.q(
+            "SELECT label, step, value FROM results WHERE run_id = ? AND kind = 'metric' ORDER BY sent_at, id",
+            (run_id,),
+        ):
+            out.setdefault(r["label"], []).append((r["step"] if r["step"] is not None else 0, r["value"]))
+        return out
+
+    def images(self, run_id: str) -> dict[str, list[sqlite3.Row]]:
+        """{label: [results行, ...]}（古い順）"""
+        out: dict[str, list[sqlite3.Row]] = {}
+        for r in self.q(
+            "SELECT * FROM results WHERE run_id = ? AND kind = 'image' ORDER BY sent_at, id", (run_id,),
+        ):
+            out.setdefault(r["label"], []).append(r)
+        return out
+
+    def jobs(self, run_id: str) -> list[sqlite3.Row]:
+        return self.q("SELECT * FROM jobs WHERE run_id = ? ORDER BY started_at", (run_id,))
+
+
+# ---------------------------------------------------------------------------
+# 表示
+
+
+def _fmt(v: float) -> str:
+    return f"{v:.6g}"
+
+
+def _run_title(store: Store, run: sqlite3.Row) -> str:
+    gname = store.group_names(run["project"]).get(run["run_group"], run["run_group"])
+    return f"{run['project']} / {gname} / {run['display_name']}"
+
+
+def _series_summary(points: list[tuple[int, float, float]]) -> str:
+    first, last = points[0], points[-1]
+    lo = min(points, key=lambda p: p[2])
+    return (f"{len(points)}点  最初 ({_fmt(first[1])}, {_fmt(first[2])})  "
+            f"最小 ({_fmt(lo[1])}, {_fmt(lo[2])})  最後 ({_fmt(last[1])}, {_fmt(last[2])})")
+
+
+def _previous_run(store: Store, run: sqlite3.Row) -> sqlite3.Row | None:
+    """同じ group で、この run より前に作られた最後の（draft 以外の）run"""
+    before = [r for r in store.runs_in_group(run["project"], run["run_group"])
+              if r["status"] != "draft" and (r["created_at"], r["run_id"]) < (run["created_at"], run["run_id"])]
+    return before[-1] if before else None
+
+
+def _config_diff(a: str, b: str, name_a: str, name_b: str) -> str:
+    lines = difflib.unified_diff(a.splitlines(), b.splitlines(), name_a, name_b, lineterm="", n=0)
+    return "\n".join(line for line in lines if not line.startswith("@@"))
+
+
+def cmd_ls(store: Store, project: str | None) -> None:
+    projects = [store.resolve_project(project)] if project else store.projects()
+    for p in projects:
+        print(p)
+        names = store.group_names(p)
+        groups = sorted({r["run_group"] for r in store.q("SELECT run_group FROM runs WHERE project = ?", (p,))},
+                        key=lambda g: names.get(g, g))
+        for g in groups:
+            label = names.get(g, g)
+            print(f"  {label}" + (f"  (group_id: {g})" if label != g else ""))
+            for r in store.runs_in_group(p, g):
+                when = (r["started_at"] or r["created_at"])[:16].replace("T", " ")
+                print(f"    {r['display_name']:<4} {r['status']:<9} {r['origin']:<5} {when}  {r['run_id']}")
+
+
+def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int) -> None:
+    print(f"# {_run_title(store, run)}")
+    print(f"run_id: {run['run_id']}  status: {run['status']}  origin: {run['origin']}  group_id: {run['run_group']}")
+    print(f"開始: {run['started_at'] or '-'}  終了: {run['ended_at'] or '-'}")
+    if run["error"]:
+        err = run["error"].strip().splitlines()
+        print("エラー（末尾）:")
+        for line in err[-10:]:
+            print(f"  {line}")
+
+    print("\n## config")
+    prev = _previous_run(store, run)
+    if config_mode == "full" or prev is None:
+        print(run["config_toml"].rstrip())
+    else:
+        diff = _config_diff(prev["config_toml"], run["config_toml"], prev["display_name"], run["display_name"])
+        print(f"（同じ group の前の run {prev['display_name']} からの差分。全文は --config full）")
+        print(diff if diff else "差分なし")
+
+    plots = store.plots(run["run_id"])
+    metrics = store.metrics(run["run_id"])
+    if plots or metrics:
+        print("\n## グラフ")
+    for p in plots:
+        axes = f"{p['kind']}  x: {p['xlabel'] or '-'}({p['xscale']})  y: {p['ylabel'] or '-'}({p['yscale']})"
+        print(f"{p['label']}  [{axes}]" + (f"  {p['title']}" if p["title"] else ""))
+        for name, points in store.series(run["run_id"], p["label"]).items():
+            print(f"  {name}: {_series_summary(points)}")
+    for label, values in metrics.items():
+        pts = [(i, float(s), v) for i, (s, v) in enumerate(values)]
+        print(f"{label}  [log()で送った数値  x: step]")
+        print(f"  {_series_summary(pts)}")
+
+    images = store.images(run["run_id"])
+    if images:
+        print("\n## 画像（Read で開ける。新しいものが最後）")
+    for label, rows in images.items():
+        print(f"{label}: {len(rows)}枚")
+        for r in rows[-3:]:
+            step = f" step {r['step']}" if r["step"] is not None else ""
+            print(f"  {store.media_dir / r['image_path']}  ({r['source']}{step})")
+        if len(rows) > 3:
+            print(f"  …ほか{len(rows) - 3}枚（最新3枚だけ表示）")
+
+    jobs = store.jobs(run["run_id"])
+    if jobs:
+        print("\n## ジョブ")
+    for j in jobs:
+        log = store.media_dir / j["log_path"] if j["log_path"] else None
+        print(f"{j['kind']:<5} {j['status']:<9} exit={j['exit_code']}  {j['job_id']}" + (f"  log: {log}" if log else ""))
+        if log_lines and log and log.is_file():
+            tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-log_lines:]
+            for line in tail:
+                print(f"    | {line}")
+
+
+def cmd_plot(store: Store, run: sqlite3.Row, label: str, points: int) -> None:
+    print(f"# {_run_title(store, run)}  {label}")
+    plot = next((p for p in store.plots(run["run_id"]) if p["label"] == label), None)
+    if plot is not None:
+        series = store.series(run["run_id"], label)
+        decimate = decimate_minmax if plot["kind"] == "line" else decimate_stride
+        print(f"x: {plot['xlabel'] or 'x'}  y: {plot['ylabel'] or 'y'}  （{plot['kind']}。{points}点までに間引き）")
+    else:
+        metrics = store.metrics(run["run_id"])
+        if label not in metrics:
+            labels = [p["label"] for p in store.plots(run["run_id"])] + list(metrics)
+            raise CliError(f"ラベルが見つかりません: {label}（候補: {', '.join(labels)}）")
+        series = {"default": [(i, float(s), v) for i, (s, v) in enumerate(metrics[label])]}
+        decimate = decimate_minmax
+        print(f"x: step  y: value  （{points}点までに間引き）")
+    for name, pts in series.items():
+        shown = decimate(pts, max(points, 4))
+        print(f"\n[{name}] 全{len(pts)}点" + (f" → {len(shown)}点" if len(shown) < len(pts) else ""))
+        for _id, x, y in shown:
+            print(f"  {_fmt(x)}\t{_fmt(y)}")
+
+
+def _last_values(store: Store, run: sqlite3.Row) -> dict[str, tuple[float, float]]:
+    """{"label[series]": (最後の値, 最小値)}"""
+    out: dict[str, tuple[float, float]] = {}
+    for p in store.plots(run["run_id"]):
+        for name, pts in store.series(run["run_id"], p["label"]).items():
+            key = p["label"] if name == "default" else f"{p['label']}[{name}]"
+            out[key] = (pts[-1][2], min(y for _i, _x, y in pts))
+    for label, values in store.metrics(run["run_id"]).items():
+        out[label] = (values[-1][1], min(v for _s, v in values))
+    return out
+
+
+def cmd_compare(store: Store, run1: sqlite3.Row, run2: sqlite3.Row) -> None:
+    t1, t2 = _run_title(store, run1), _run_title(store, run2)
+    print(f"# 比較\n  A: {t1}  ({run1['run_id']})\n  B: {t2}  ({run2['run_id']})")
+    print("\n## config の差分（A → B）")
+    diff = _config_diff(run1["config_toml"], run2["config_toml"], "A", "B")
+    print(diff if diff else "差分なし")
+    v1, v2 = _last_values(store, run1), _last_values(store, run2)
+    keys = sorted(set(v1) | set(v2))
+    if keys:
+        print("\n## 数値（最後の値 / 最小値）")
+        width = max(len(k) for k in keys)
+        print(f"{'ラベル':<{width}}  {'A 最後':>12} {'A 最小':>12}  {'B 最後':>12} {'B 最小':>12}")
+        for k in keys:
+            a = v1.get(k)
+            b = v2.get(k)
+            fa = f"{_fmt(a[0]):>12} {_fmt(a[1]):>12}" if a else f"{'-':>12} {'-':>12}"
+            fb = f"{_fmt(b[0]):>12} {_fmt(b[1]):>12}" if b else f"{'-':>12} {'-':>12}"
+            print(f"{k:<{width}}  {fa}  {fb}")
+    i1, i2 = store.images(run1["run_id"]), store.images(run2["run_id"])
+    labels = sorted(set(i1) | set(i2))
+    if labels:
+        print("\n## 画像（それぞれ最新1枚。Read で開いて見比べる）")
+        for label in labels:
+            print(label)
+            for tag, imgs in (("A", i1), ("B", i2)):
+                rows = imgs.get(label)
+                print(f"  {tag}: {store.media_dir / rows[-1]['image_path']}" if rows else f"  {tag}: なし")
+
+
+# ---------------------------------------------------------------------------
+
+
+def _open_store(db: str | None) -> Store:
+    if db:
+        db_path = Path(db)
+        return Store(db_path, db_path.parent / "media")
+    if DEFAULT_PATH.is_file():
+        settings = load_settings()
+        return Store(settings.server.db_path, settings.server.media_dir)
+    return Store(_DEFAULT_DB, _DEFAULT_MEDIA)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m train_webui.cli", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--db", help="DB のパス（省略時は server.toml の db_path）")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("ls", help="project / group / run の一覧")
+    p.add_argument("project", nargs="?")
+
+    p = sub.add_parser("show", help="run の要約（config差分・グラフの要約・画像のパス・ジョブ）")
+    p.add_argument("project")
+    p.add_argument("group")
+    p.add_argument("run", nargs="?")
+    p.add_argument("--config", choices=["diff", "full"], default="diff", help="config を前の run との差分で出すか全文か")
+    p.add_argument("--log", type=int, default=0, metavar="N", help="各ジョブのログの末尾 N 行も出す")
+
+    p = sub.add_parser("plot", help="1つのグラフを少ない点数の表で出す")
+    p.add_argument("project")
+    p.add_argument("group")
+    p.add_argument("label")
+    p.add_argument("run", nargs="?")
+    p.add_argument("--points", type=int, default=50, help="1系列あたりの点数（既定 50）")
+
+    p = sub.add_parser("compare", help="2つの group（の run）の config 差分と数値を比べる")
+    p.add_argument("project")
+    p.add_argument("group1")
+    p.add_argument("group2")
+    p.add_argument("--run1")
+    p.add_argument("--run2")
+
+    args = parser.parse_args(argv)
+    try:
+        store = _open_store(args.db)
+        if args.cmd == "ls":
+            cmd_ls(store, args.project)
+            return 0
+        project = store.resolve_project(args.project)
+        if args.cmd == "show":
+            group = store.resolve_group(project, args.group)
+            cmd_show(store, store.resolve_run(project, group, args.run), args.config, args.log)
+        elif args.cmd == "plot":
+            group = store.resolve_group(project, args.group)
+            cmd_plot(store, store.resolve_run(project, group, args.run), args.label, args.points)
+        else:
+            g1 = store.resolve_group(project, args.group1)
+            g2 = store.resolve_group(project, args.group2)
+            cmd_compare(store, store.resolve_run(project, g1, args.run1), store.resolve_run(project, g2, args.run2))
+    except CliError as e:
+        print(f"エラー: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
