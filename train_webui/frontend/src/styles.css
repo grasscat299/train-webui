@@ -95,6 +95,17 @@ button { font: inherit; color: inherit; }
 .tree-toggle svg { width: 12px; height: 12px; }
 .tree-project-name { font-weight: 600; }
 .tree-group-name { color: var(--text); }
+/* 長い名前でナビが横にはみ出さないよう、行の幅に収まらない分は … で省略する（全体は title で見られる） */
+.tree { overflow-x: hidden; }
+.tree-project-name, .tree-group-name, .run-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-run-btn { min-width: 0; }
+.row-actions, .eye-toggle, .status-dot, .cli-badge { flex-shrink: 0; }
 /* 子要素は縦の補助線でつなぐ（どの group / project の下かが分かるように） */
 .tree-children { margin-left: 7px; padding-left: 9px; border-left: 1px solid var(--border); }
 .tree-row { padding-right: 2px; }

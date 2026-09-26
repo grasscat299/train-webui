@@ -47,7 +47,7 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
             onChange={(on) => toggleProject(node.project, node.groups, on)}
           />
         )}
-        <span className="tree-project-name">{node.project}</span>
+        <span className="tree-project-name" title={node.project}>{node.project}</span>
         <span className="row-actions">
           <IconButton title="新規group" onClick={() => onNewGroup(node.project)}>
             <PlusIcon />
@@ -109,7 +109,7 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
             onChange={(on) => toggleGroup(project, node.group, node.runs, on)}
           />
         )}
-        <span className="tree-group-name" title={`group_id: ${node.group}`}>
+        <span className="tree-group-name" title={`${node.group_name}（group_id: ${node.group}）`}>
           {node.group_name}
         </span>
         <span className="row-actions">
