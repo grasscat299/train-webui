@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { GroupNode, ProjectNode, RunSummary } from '../api';
 import { EyeToggle } from './EyeToggle';
+import { ChevronIcon, IconButton, PencilIcon, PlayIcon, PlusIcon } from './Icons';
 
 export interface TreeProps {
   tree: ProjectNode[];
@@ -37,8 +38,8 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
   return (
     <div className="tree-project">
       <div className="tree-row tree-project-row">
-        <button className="tree-toggle" onClick={() => setOpen((v) => !v)}>
-          {open ? '▼' : '▶'}
+        <button className="tree-toggle" onClick={() => setOpen((v) => !v)} aria-label={open ? '閉じる' : '開く'}>
+          <ChevronIcon open={open} />
         </button>
         {mode === 'result' && (
           <EyeToggle
@@ -47,6 +48,11 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
           />
         )}
         <span className="tree-project-name">{node.project}</span>
+        <span className="row-actions">
+          <IconButton title="新規group" onClick={() => onNewGroup(node.project)}>
+            <PlusIcon />
+          </IconButton>
+        </span>
       </div>
       {open && (
         <div className="tree-children">
@@ -68,9 +74,6 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
               toggleGroup={toggleGroup}
             />
           ))}
-          <button className="tree-add" onClick={() => onNewGroup(node.project)}>
-            + 新規group
-          </button>
         </div>
       )}
     </div>
@@ -97,8 +100,8 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
   return (
     <div className="tree-group">
       <div className="tree-row tree-group-row">
-        <button className="tree-toggle" onClick={() => setOpen((v) => !v)}>
-          {open ? '▼' : '▶'}
+        <button className="tree-toggle" onClick={() => setOpen((v) => !v)} aria-label={open ? '閉じる' : '開く'}>
+          <ChevronIcon open={open} />
         </button>
         {mode === 'result' && (
           <EyeToggle
@@ -109,13 +112,18 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
         <span className="tree-group-name" title={`group_id: ${node.group}`}>
           {node.group_name}
         </span>
-        <button className="tree-rename" title="group名を変更" onClick={() => onRenameGroup(project, node.group, node.group_name)}>
-          ✎
-        </button>
-        {/* Train / Result どちらのタブでも group 単位で infer を起動できる（結果は Result タブに自動で反映される） */}
-        <button className="infer-btn" disabled={busy} onClick={() => onInfer(project, node.group)} title="model_{group}.pt で推論を実行">
-          [infer]
-        </button>
+        <span className="row-actions">
+          <IconButton title="新規run（このgroupに下書きを作る）" onClick={() => onNewRunDraft(project, node.group)}>
+            <PlusIcon />
+          </IconButton>
+          {/* Train / Result どちらのタブでも group 単位で infer を起動できる（結果は Result タブに自動で反映される） */}
+          <IconButton title="infer（model_{group_id}.pt で推論）" disabled={busy} onClick={() => onInfer(project, node.group)}>
+            <PlayIcon />
+          </IconButton>
+          <IconButton title="group名を変更" onClick={() => onRenameGroup(project, node.group, node.group_name)}>
+            <PencilIcon />
+          </IconButton>
+        </span>
       </div>
       {open && (
         <div className="tree-children">
@@ -133,11 +141,6 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
               </button>
             </div>
           ))}
-          {mode === 'train' && (
-            <button className="tree-add" onClick={() => onNewRunDraft(project, node.group)}>
-              + 新規run
-            </button>
-          )}
         </div>
       )}
     </div>
