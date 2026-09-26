@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>学習管理WebUI</title>
+    <script>
+      // React が描画する前にテーマを決めて、読み込み時に一瞬白くならないようにする（既定はダーク）
+      (function () {
+        var theme = 'dark';
+        try {
+          var saved = JSON.parse(localStorage.getItem('train_webui.theme'));
+          if (saved === 'light' || saved === 'dark' || saved === 'system') theme = saved;
+        } catch (e) {}
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

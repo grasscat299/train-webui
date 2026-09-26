@@ -8,6 +8,7 @@ import { TrainPanel } from './components/TrainPanel';
 import { ResultPanel } from './components/ResultPanel';
 import { NavResizer } from './components/NavResizer';
 import { ViewSettingsMenu } from './components/ViewSettingsMenu';
+import type { Theme } from './components/ViewSettingsMenu';
 import { DEFAULT_VIEW, ViewContext, useViewSettings, viewStyle } from './viewSettings';
 
 type Tab = 'train' | 'result';
@@ -21,6 +22,11 @@ export default function App() {
   const [groupChecked, setGroupChecked] = usePersistentState<Record<string, boolean>>('groupChecked', {});
   const [projectChecked, setProjectChecked] = usePersistentState<Record<string, boolean>>('projectChecked', {});
   const [actionError, setActionError] = useState<string | null>(null);
+  // テーマ（既定はダーク）。index.html でも同じ保存値を読んで、描画前に data-theme を付けている
+  const [theme, setTheme] = usePersistentState<Theme>('theme', 'dark');
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   const { data: tree, setData: setTree } = usePolling<ProjectNode[]>(() => api.getTree(), 2500, []);
   const { data: state } = usePolling<StateResp>(() => api.getState(), 2500, []);
@@ -131,7 +137,7 @@ export default function App() {
               Result
             </button>
           </nav>
-          <ViewSettingsMenu view={view} onChange={updateView} onReset={resetView} />
+          <ViewSettingsMenu view={view} onChange={updateView} onReset={resetView} theme={theme} onThemeChange={setTheme} />
           <button className="rescan" onClick={rescan}>
             再スキャン
           </button>

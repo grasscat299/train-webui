@@ -10,10 +10,20 @@ const ROWS: { key: keyof ViewSettings; label: string; unit: string }[] = [
 ];
 
 // 上部バーの「表示設定」: スライダーで大きさを変える。変更はすぐ全パネル・全画像に反映される。
-export function ViewSettingsMenu({ view, onChange, onReset }: {
+export type Theme = 'dark' | 'light' | 'system';
+
+const THEMES: { value: Theme; label: string }[] = [
+  { value: 'dark', label: 'ダーク' },
+  { value: 'light', label: 'ライト' },
+  { value: 'system', label: 'OSに合わせる' },
+];
+
+export function ViewSettingsMenu({ view, onChange, onReset, theme, onThemeChange }: {
   view: ViewSettings;
   onChange: (key: keyof ViewSettings, value: number) => void;
   onReset: () => void;
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -33,6 +43,17 @@ export function ViewSettingsMenu({ view, onChange, onReset }: {
       </button>
       {open && (
         <div className="view-menu-popover">
+          <div className="view-menu-row">
+            <span className="view-menu-label">テーマ</span>
+            <div className="view-menu-theme">
+              {THEMES.map((t) => (
+                <button key={t.value} className={theme === t.value ? 'on' : ''} onClick={() => onThemeChange(t.value)}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <span />
+          </div>
           {ROWS.map(({ key, label, unit }) => (
             <label key={key} className="view-menu-row">
               <span className="view-menu-label">{label}</span>
