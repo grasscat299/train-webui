@@ -106,3 +106,36 @@ def test_view_reads_screen_state_and_run_ids(app_factory, capsys):
     assert cli.main(["--db", db, "view", ids[0]]) == 0  # run_id を並べればその run
     assert "指定" in capsys.readouterr().out
     assert cli.main(["--db", db, "view", "nope"]) == 1
+
+
+def test_comparisons_crud_and_cli(app_factory, capsys):
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "src/proj_a")
+    client = TestClient(app)
+    rid = client.post("/api/runs", json={
+        "project": "src/proj_a", "group": "g1", "config_toml": '[wandb]\ngroup = "g1"\n', "hostname": "h", "pid": 1,
+    }).json()["run_id"]
+    db = str(settings.server.db_path)
+
+    assert cli.main(["--db", db, "comparisons"]) == 0
+    assert "ありません" in capsys.readouterr().out
+
+    assert client.post("/api/comparisons", json={"name": " ", "run_ids": [rid]}).status_code == 400
+    cmp = client.post("/api/comparisons", json={
+        "name": "lr比較", "run_ids": [rid, "gone"], "labels": ["a"], "hidden_labels": ["b"]}).json()
+    assert cmp["run_ids"] == [rid, "gone"] and cmp["hidden_labels"] == ["b"]
+    assert [c["name"] for c in client.get("/api/comparisons").json()] == ["lr比較"]
+
+    renamed = client.put(f"/api/comparisons/{cmp['id']}", json={"name": "新しい名前"}).json()
+    assert renamed["name"] == "新しい名前" and renamed["run_ids"] == [rid, "gone"]  # 渡した項目だけ変わる
+    assert client.put("/api/comparisons/nope", json={"name": "x"}).status_code == 404
+
+    assert cli.main(["--db", db, "comparisons"]) == 0
+    assert "新しい名前" in capsys.readouterr().out
+    assert cli.main(["--db", db, "view", "--comparison", "新しい名前"]) == 0
+    out = capsys.readouterr().out
+    assert "保存した比較「新しい名前」" in out and rid in out and "gone は削除されています" in out
+    assert cli.main(["--db", db, "view", "--comparison", "nope"]) == 1
+
+    assert client.delete(f"/api/comparisons/{cmp['id']}").status_code == 204
+    assert client.get("/api/comparisons").json() == []

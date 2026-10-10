@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { api } from '../api';
 import { waitUntilVisible } from '../hooks/visibility';
 import type { ImageResult, LabelInfo, MetricResult, Plot, ProjectNode, Result } from '../api';
@@ -6,7 +7,6 @@ import { MetricChart } from './MetricChart';
 import { PlotChart, mergePlots } from './PlotChart';
 import { PanelSections } from './PanelSections';
 import type { PanelItem } from './PanelSections';
-import { usePersistentState } from '../hooks/usePersistentState';
 import { copyText } from '../copyText';
 
 interface RunMeta {
@@ -20,16 +20,17 @@ interface RunMeta {
 // 動いていない run の結果を確認し直す間隔（CLI から手で infer した結果などを拾うため、止めはしない）
 const IDLE_REFRESH_MS = 60000;
 
-export function ResultPanel({ runIds, tree, activeRunId, onVisibleLabels }: {
+export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSelectedLabels, onLabelState }: {
   runIds: string[];
   tree: ProjectNode[];
   activeRunId: string | null;
-  // 今表示しているラベルが変わるたびに通知する（画面の構成を Claude に見せるため）
-  onVisibleLabels: (labels: string[]) => void;
+  // ラベルの表示・非表示（App が持つ。保存した比較の復元でも書き換えるため）
+  selectedLabels: Record<string, boolean>;
+  setSelectedLabels: Dispatch<SetStateAction<Record<string, boolean>>>;
+  // 今表示している・隠しているラベルが変わるたびに通知する（画面の構成を Claude に見せる・比較を保存するため）
+  onLabelState: (visible: string[], hidden: string[]) => void;
 }) {
   const [labels, setLabels] = useState<LabelInfo[]>([]);
-  // ラベルの表示・非表示は再読み込みしても残す
-  const [selectedLabels, setSelectedLabels] = usePersistentState<Record<string, boolean>>('selectedLabels', {});
   const [resultsByRun, setResultsByRun] = useState<Record<string, Result[]>>({});
   const [plotsByRun, setPlotsByRun] = useState<Record<string, Plot[]>>({});
   // 差分取得用: runごとの手元の Plot（ポーリング中に最新を参照するため ref に持つ）
@@ -62,9 +63,10 @@ export function ResultPanel({ runIds, tree, activeRunId, onVisibleLabels }: {
     wasLiveRef.current = {};
     // 表示中のラベル = 画面に出ているグラフ・画像の見出し（チップがONのもの）
   const visibleLabels = labels.filter((l) => selectedLabels[l.label] ?? true).map((l) => l.label);
-  const visibleKey = visibleLabels.join('\u0000');
+  const hiddenLabels = labels.filter((l) => !(selectedLabels[l.label] ?? true)).map((l) => l.label);
+  const visibleKey = visibleLabels.join('\u0000') + '\u0001' + hiddenLabels.join('\u0000');
   useEffect(() => {
-    onVisibleLabels(visibleLabels);
+    onLabelState(visibleLabels, hiddenLabels);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleKey]);
 

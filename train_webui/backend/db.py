@@ -113,6 +113,17 @@ CREATE TABLE IF NOT EXISTS plot_points (
 
 CREATE INDEX IF NOT EXISTS idx_plot_points_run_label ON plot_points(run_id, label, id);
 
+-- Result タブで名前を付けて残した比較（比較する run と、表示中・非表示のラベル。いずれも JSON の配列）
+CREATE TABLE IF NOT EXISTS comparisons (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    run_ids TEXT NOT NULL,
+    labels TEXT NOT NULL,
+    hidden_labels TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- 画面で今見ている構成（タブ・比較中の run・表示中のラベル）。1行だけ持ち、Claude が cli の view で読む
 CREATE TABLE IF NOT EXISTS view_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -218,6 +229,39 @@ class Database:
         sql = f"INSERT INTO runs ({', '.join(cols)}) VALUES ({placeholders})"
         with self._connect() as conn:
             conn.execute(sql, [fields[c] for c in cols])
+
+    # ---- comparisons ---------------------------------------------------
+
+    def list_comparisons(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM comparisons ORDER BY created_at, id").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_comparison(self, comparison_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM comparisons WHERE id = ?", (comparison_id,)).fetchone()
+        return dict(row) if row else None
+
+    def create_comparison(self, comparison_id: str, name: str, run_ids: str, labels: str, hidden_labels: str) -> None:
+        now = now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO comparisons (id, name, run_ids, labels, hidden_labels, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (comparison_id, name, run_ids, labels, hidden_labels, now, now),
+            )
+
+    def update_comparison(self, comparison_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        fields["updated_at"] = now_iso()
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        with self._connect() as conn:
+            conn.execute(f"UPDATE comparisons SET {set_clause} WHERE id = ?", [*fields.values(), comparison_id])
+
+    def delete_comparison(self, comparison_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM comparisons WHERE id = ?", (comparison_id,))
 
     def get_view_state(self) -> dict | None:
         with self._connect() as conn:

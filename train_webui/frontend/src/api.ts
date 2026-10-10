@@ -122,6 +122,19 @@ export interface LabelInfo {
   kind: 'metric' | 'image' | 'plot';
 }
 
+// Result タブで名前を付けて残した比較（比較する run と、表示中・非表示のラベル）
+export interface Comparison {
+  id: string;
+  name: string;
+  run_ids: string[];
+  labels: string[];
+  hidden_labels: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type ComparisonBody = Pick<Comparison, 'run_ids' | 'labels' | 'hidden_labels'>;
+
 export interface JobLogResp {
   data: string;
   offset: number;
@@ -156,6 +169,11 @@ export interface Api {
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
   getPlots(runId: string, afterId?: number | null): Promise<Plot[]>;
   // 画面で今見ている構成を server に送る（Claude が `cli view` で読む）
+  listComparisons(): Promise<Comparison[]>;
+  createComparison(name: string, body: ComparisonBody): Promise<Comparison>;
+  // 渡した項目だけ更新する（名前だけ変える、構成だけ上書きする）
+  updateComparison(id: string, patch: Partial<ComparisonBody> & { name?: string }): Promise<Comparison>;
+  deleteComparison(id: string): Promise<void>;
   putView(tab: 'train' | 'result', runIds: string[], labels: string[]): Promise<void>;
 }
 
@@ -226,6 +244,12 @@ const realApi: Api = {
     request<Plot[]>(
       `/api/runs/${encodeURIComponent(runId)}/plots${afterId != null ? `?after_id=${afterId}` : ''}`,
     ),
+  listComparisons: () => request<Comparison[]>('/api/comparisons'),
+  createComparison: (name, body) =>
+    request<Comparison>('/api/comparisons', { method: 'POST', body: JSON.stringify({ name, ...body }) }),
+  updateComparison: (id, patch) =>
+    request<Comparison>(`/api/comparisons/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  deleteComparison: (id) => request<void>(`/api/comparisons/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   putView: (tab, runIds, labels) =>
     request<void>('/api/view', {
       method: 'PUT',

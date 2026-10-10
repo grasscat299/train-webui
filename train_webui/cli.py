@@ -7,8 +7,10 @@ DB（train_webui/data/webui.sqlite）と画像フォルダを直接読むので�
     venv/bin/python -m train_webui.cli show <project> <group> [run]
     venv/bin/python -m train_webui.cli plot <project> <group> <label> [run] [--points 50]
     venv/bin/python -m train_webui.cli compare <project> <group1> <group2> [--run1 v1] [--run2 v2]
-    venv/bin/python -m train_webui.cli view [run_id ...] [--config full] [--log N]
+    venv/bin/python -m train_webui.cli view [run_id ...] [--comparison 名前かid] [--config full] [--log N]
+    venv/bin/python -m train_webui.cli comparisons
 
+- comparisons は、Result タブで名前を付けて残した比較の一覧。`view --comparison <名前>` でその比較を読む。
 - view は、WebUI の画面で今見ている構成（タブ・比較中の run・表示中のラベル）をそのまま読む。run_id を
   並べると、画面の代わりにその run たちを同じ形で出す（ツリーの📋ボタンでコピーした run_id を貼れる）。
 
@@ -59,6 +61,25 @@ class Store:
         except sqlite3.OperationalError:
             return None
         return (json.loads(rows[0]["data"]), rows[0]["updated_at"]) if rows else None
+
+    def comparisons(self) -> list[dict]:
+        try:
+            rows = self.q("SELECT * FROM comparisons ORDER BY created_at, id")
+        except sqlite3.OperationalError:  # comparisons 追加前の DB
+            return []
+        return [{"id": r["id"], "name": r["name"], "run_ids": json.loads(r["run_ids"]),
+                 "labels": json.loads(r["labels"]), "hidden_labels": json.loads(r["hidden_labels"]),
+                 "updated_at": r["updated_at"]} for r in rows]
+
+    def resolve_comparison(self, key: str) -> dict:
+        items = self.comparisons()
+        hits = [c for c in items if c["id"] == key] or [c for c in items if c["name"] == key]
+        if len(hits) == 1:
+            return hits[0]
+        listing = ", ".join(f"{c['name']}({c['id']})" for c in items) or "（なし）"
+        if not hits:
+            raise CliError(f"比較が見つかりません: {key}（候補: {listing}）")
+        raise CliError(f"同じ名前の比較が複数あります: {key} → id で指定してください（候補: {listing}）")
 
     def run_by_id(self, run_id: str) -> sqlite3.Row | None:
         rows = self.q("SELECT * FROM runs WHERE run_id = ?", (run_id,))
@@ -336,8 +357,20 @@ def cmd_compare(store: Store, run1: sqlite3.Row, run2: sqlite3.Row) -> None:
 # ---------------------------------------------------------------------------
 
 
-def cmd_view(store: Store, run_ids: list[str], config_mode: str, log_lines: int) -> None:
-    if run_ids:
+def cmd_comparisons(store: Store) -> None:
+    items = store.comparisons()
+    if not items:
+        print("保存された比較はありません")
+    for c in items:
+        print(f"{c['name']}  (id: {c['id']}, {len(c['run_ids'])}run, ラベル{len(c['labels'])}件, 更新 {c['updated_at']})")
+
+
+def cmd_view(store: Store, run_ids: list[str], config_mode: str, log_lines: int, comparison: str | None = None) -> None:
+    if comparison:
+        saved_cmp = store.resolve_comparison(comparison)
+        run_ids, labels = saved_cmp["run_ids"], set(saved_cmp["labels"])
+        tab, stamp = f"保存した比較「{saved_cmp['name']}」", saved_cmp["updated_at"]
+    elif run_ids:
         tab, labels, stamp = "指定", None, None
     else:
         saved = store.view_state()
@@ -350,9 +383,13 @@ def cmd_view(store: Store, run_ids: list[str], config_mode: str, log_lines: int)
     for rid in run_ids:
         run = store.run_by_id(rid)
         if run is None:
+            if comparison:  # 保存した比較の run が後から削除されていても、残りは読めるようにする
+                print(f"（run_id {rid} は削除されています）")
+                continue
             raise CliError(f"run_id が見つかりません: {rid}")
         runs.append(run)
-    print(f"# WebUI の画面（{tab}タブ" + (f"、{stamp} 時点" if stamp else "") + "）")
+    kind = tab if comparison else f"{tab}タブ"
+    print(f"# WebUI の画面（{kind}" + (f"、{stamp} 時点" if stamp else "") + "）")
     print(f"対象の run: {len(runs)}件")
     for run in runs:
         print(f"  {run['run_id']}  {_run_title(store, run)}  [{run['status']}]")
@@ -415,8 +452,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("view", help="WebUI の画面で今見ている構成をそのまま読む（run_id を並べればその run たち）")
     p.add_argument("run_ids", nargs="*", metavar="run_id")
+    p.add_argument("--comparison", metavar="名前かid", help="Result タブで保存した比較を読む")
     p.add_argument("--config", choices=["diff", "full"], default="diff")
     p.add_argument("--log", type=int, default=0, metavar="N")
+
+    sub.add_parser("comparisons", help="Result タブで保存した比較の一覧")
 
     args = parser.parse_args(argv)
     try:
@@ -425,7 +465,10 @@ def main(argv: list[str] | None = None) -> int:
             cmd_ls(store, args.project)
             return 0
         if args.cmd == "view":
-            cmd_view(store, args.run_ids, args.config, args.log)
+            cmd_view(store, args.run_ids, args.config, args.log, args.comparison)
+            return 0
+        if args.cmd == "comparisons":
+            cmd_comparisons(store)
             return 0
         project = store.resolve_project(args.project)
         if args.cmd == "show":

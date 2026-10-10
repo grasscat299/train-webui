@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import ipaddress
 import math
 import shutil
@@ -72,6 +73,21 @@ class ViewStateRequest(BaseModel):
     tab: Literal["train", "result"]
     run_ids: list[str]  # Train タブなら選択中の run、Result タブなら比較中の run
     labels: list[str] = []  # Result タブで表示中のラベル
+
+
+class ComparisonCreate(BaseModel):
+    name: str
+    run_ids: list[str]
+    labels: list[str] = []  # 表示中のラベル
+    hidden_labels: list[str] = []  # 非表示にしていたラベル（読み込み時に同じ表示に戻すため）
+
+
+class ComparisonUpdate(BaseModel):
+    """渡した項目だけ更新する（名前だけ変える、構成だけ上書きする、など）。"""
+    name: str | None = None
+    run_ids: list[str] | None = None
+    labels: list[str] | None = None
+    hidden_labels: list[str] | None = None
 
 
 class InferRequest(BaseModel):
@@ -421,6 +437,51 @@ def create_app(
             raise HTTPException(404, "run が見つかりません")
         db.update_run(run_id, comment=body.comment)
         return _run_detail(db, db.get_run(run_id))
+
+    def _comparison_public(row: dict) -> dict:
+        return {
+            "id": row["id"], "name": row["name"], "run_ids": json.loads(row["run_ids"]),
+            "labels": json.loads(row["labels"]), "hidden_labels": json.loads(row["hidden_labels"]),
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
+    @app.get("/api/comparisons")
+    def list_comparisons() -> list[dict]:
+        return [_comparison_public(r) for r in db.list_comparisons()]
+
+    @app.post("/api/comparisons")
+    def create_comparison(body: ComparisonCreate) -> dict:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(400, "名前が空です")
+        comparison_id = new_run_id(exists=lambda c: db.get_comparison(c) is not None)
+        db.create_comparison(
+            comparison_id, name, json.dumps(body.run_ids), json.dumps(body.labels), json.dumps(body.hidden_labels),
+        )
+        return _comparison_public(db.get_comparison(comparison_id))
+
+    @app.put("/api/comparisons/{comparison_id}")
+    def update_comparison(comparison_id: str, body: ComparisonUpdate) -> dict:
+        if db.get_comparison(comparison_id) is None:
+            raise HTTPException(404, "比較が見つかりません")
+        fields: dict = {}
+        if body.name is not None:
+            if not body.name.strip():
+                raise HTTPException(400, "名前が空です")
+            fields["name"] = body.name.strip()
+        for key in ("run_ids", "labels", "hidden_labels"):
+            value = getattr(body, key)
+            if value is not None:
+                fields[key] = json.dumps(value)
+        db.update_comparison(comparison_id, **fields)
+        return _comparison_public(db.get_comparison(comparison_id))
+
+    @app.delete("/api/comparisons/{comparison_id}", status_code=204)
+    def delete_comparison(comparison_id: str) -> Response:
+        if db.get_comparison(comparison_id) is None:
+            raise HTTPException(404, "比較が見つかりません")
+        db.delete_comparison(comparison_id)
+        return Response(status_code=204)
 
     @app.put("/api/view", status_code=204)
     def put_view(body: ViewStateRequest) -> Response:

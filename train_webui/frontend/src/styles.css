@@ -188,6 +188,9 @@ button { font: inherit; color: inherit; }
   padding: 10px 8px;
   flex-shrink: 0;
 }
+/* ナビの縦スクロールバーは表示しない（ホイール・トラックパッドでのスクロールはできる） */
+.tree { scrollbar-width: none; }
+.tree::-webkit-scrollbar { display: none; }
 .tree-empty { color: var(--muted); padding: 8px; }
 .tree-row { display: flex; align-items: center; gap: 4px; min-height: 24px; border-radius: 4px; }
 .tree-toggle {
@@ -673,3 +676,29 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
   padding: 0 4px;
 }
 .comment-sidebar-body { flex: 1; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 10px; }
+
+/* ---- Result タブの「比較」（保存した run と表示ラベルの組） ---- */
+.comparison-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.comparison-title { color: var(--muted); font-size: 12px; }
+.comparison-select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  max-width: 280px;
+}
+.comparison-dirty { color: var(--accent); font-size: 12px; }
+.comparison-btn {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.comparison-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.comparison-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.comparison-btn.danger:hover:not(:disabled) { border-color: #d66; color: #d66; }

@@ -2,6 +2,7 @@
 // api.ts の Api インターフェースを満たす（api.ts からは型のみをimportし、循環参照を避ける）。
 import type {
   Api,
+  Comparison,
   ProjectNode,
   GroupNode,
   StateResp,
@@ -729,7 +730,26 @@ async function renameGroup(project: string, group: string, groupName: string): P
   groupNames.set(groupKeyOf(project, group), groupName.trim());
 }
 
+const mockComparisons: Comparison[] = [];
+
 export const mockApi: Api = {
+  listComparisons: async () => mockComparisons.map((c) => ({ ...c })),
+  createComparison: async (name, body) => {
+    const now = new Date().toISOString();
+    const c: Comparison = { id: `c${mockComparisons.length + 1}`, name, ...body, created_at: now, updated_at: now };
+    mockComparisons.push(c);
+    return { ...c };
+  },
+  updateComparison: async (id, patch) => {
+    const c = mockComparisons.find((x) => x.id === id);
+    if (!c) throw new Error('比較が見つかりません');
+    Object.assign(c, patch, { updated_at: new Date().toISOString() });
+    return { ...c };
+  },
+  deleteComparison: async (id) => {
+    const i = mockComparisons.findIndex((x) => x.id === id);
+    if (i >= 0) mockComparisons.splice(i, 1);
+  },
   getTree,
   rescan: getTree,
   getState,
