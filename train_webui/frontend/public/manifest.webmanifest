@@ -1,0 +1,16 @@
+{
+  "name": "学習管理WebUI",
+  "short_name": "学習WebUI",
+  "description": "学習・推論の起動、監視、結果の比較",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111317",
+  "theme_color": "#111317",
+  "lang": "ja",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
