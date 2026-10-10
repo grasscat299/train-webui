@@ -563,3 +563,18 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
   上限点数に間引いて返す。
 - 間引き中の系列は3秒ごとに全点を読んで間引き直すので、1系列が数百万点になると backend が重くなり
   うる。遅くなったら SQL 側での間引き（ウィンドウ関数）やキャッシュを検討する。
+
+## PWA（アプリとしてインストールできる）
+
+- `frontend/public/` の `manifest.webmanifest`・`sw.js`・アイコンが、ビルドで `dist/` に入り server が配信する。
+  `index.html` で manifest とアイコンを読み、`main.tsx` が本番ビルドの時だけ service worker を登録する。
+- service worker は画面の殻（HTML・`/assets/*`）だけをキャッシュし、**`/api` と `/media` はキャッシュしない**
+  （学習の状態・結果が古いまま出るのを避ける）。繋がらない時は画面だけ開き、データは取れない。
+- **https（か localhost）で開かないとインストールできない**。`http://100.x.x.x:8000`（tailscale の IP）は
+  secure context ではないので、service worker が登録されず、「インストール」も出ない（コピーボタンも同じ理由で
+  フォールバックに回る）。tailscale の https で出す：
+  `tailscale serve --bg --https=<空いているport> http://127.0.0.1:8000` → `https://<マシン名>.<tailnet>.ts.net:<port>`
+  を開き、ブラウザの「インストール」（Chrome/Edge）か、iOS なら共有 →「ホーム画面に追加」。
+  serve は tailnet 内だけに公開される。server から見た接続元は 127.0.0.1（`allowed_networks` で許可済み）になる。
+- アイコンを変える時は `frontend/public/` の4枚（192・512・maskable 512・apple-touch 180）を差し替える。
+- service worker の中身を変えたら `sw.js` の `CACHE` 名を上げる（古いキャッシュが消える）。
