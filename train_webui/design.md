@@ -480,6 +480,12 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
   画面右側の開閉できるコメント欄に、Train タブでは選択中の run、Result タブでは比較中の run ごとに1つずつ欄を
   並べ、run の状態によらずいつでも編集できる（欄の幅はドラッグで変えられる）。欄の外をクリックか Ctrl+Enter で保存する。
   `train_webui.cli` の `show` / `compare` にも出る。
+- **画面の構成を Claude に見せる**: ブラウザは、今見ている構成（タブ・Train なら選択中の run・Result なら比較中の
+  run と表示中のラベル）を、変わるたびに（500ms 待ってから）`PUT /api/view` で送る。DB の `view_state`（1行）に保存され、
+  `cli view` がそれを読む（server が止まっていても読める）。送り元のブラウザが複数あれば最後に送った方が残る。
+  ツリーの各 run の行（ホバーで出る）の 📋 は、その run の `run_id` をクリップボードにコピーする。Result タブ上部の
+  「run_id をコピー」は比較中の run_id を1行ずつコピーする（Claude に貼れば `cli view <run_id>...` で読める）。
+  http（tailscale の IP）で開いていると `navigator.clipboard` が使えないので、`execCommand('copy')` にフォールバックする。
 - **`[infer]` ボタン**: Train タブと同じく、ツリーの各 group に `[infer]` を出す（§8）。Result タブで結果を見ながら
   infer を追加でき、結果は自動更新で反映される。
 - **画像はrunごとに並べる**: ラベルごとに1行、比較対象runを横に並べる。各runの最新の画像を表示する。

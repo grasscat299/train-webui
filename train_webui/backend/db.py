@@ -112,6 +112,13 @@ CREATE TABLE IF NOT EXISTS plot_points (
 );
 
 CREATE INDEX IF NOT EXISTS idx_plot_points_run_label ON plot_points(run_id, label, id);
+
+-- 画面で今見ている構成（タブ・比較中の run・表示中のラベル）。1行だけ持ち、Claude が cli の view で読む
+CREATE TABLE IF NOT EXISTS view_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    data TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -211,6 +218,19 @@ class Database:
         sql = f"INSERT INTO runs ({', '.join(cols)}) VALUES ({placeholders})"
         with self._connect() as conn:
             conn.execute(sql, [fields[c] for c in cols])
+
+    def get_view_state(self) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT data, updated_at FROM view_state WHERE id = 1").fetchone()
+        return {"data": row["data"], "updated_at": row["updated_at"]} if row else None
+
+    def set_view_state(self, data: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO view_state (id, data, updated_at) VALUES (1, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+                (data, now_iso()),
+            )
 
     def get_run(self, run_id: str) -> dict | None:
         with self._connect() as conn:

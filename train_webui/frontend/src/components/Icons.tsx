@@ -28,6 +28,19 @@ export const PencilIcon = () => (
   </Svg>
 );
 
+export const CopyIcon = () => (
+  <Svg>
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </Svg>
+);
+
+export const CheckIcon = () => (
+  <Svg>
+    <polyline points="20 6 9 17 4 12" />
+  </Svg>
+);
+
 export const ChevronIcon = ({ open }: { open: boolean }) => (
   <Svg>
     <polyline points={open ? '6 9 12 15 18 9' : '9 6 15 12 9 18'} />

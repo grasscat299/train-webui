@@ -7,6 +7,7 @@ import { PlotChart, mergePlots } from './PlotChart';
 import { PanelSections } from './PanelSections';
 import type { PanelItem } from './PanelSections';
 import { usePersistentState } from '../hooks/usePersistentState';
+import { copyText } from '../copyText';
 
 interface RunMeta {
   project: string;
@@ -19,7 +20,13 @@ interface RunMeta {
 // 動いていない run の結果を確認し直す間隔（CLI から手で infer した結果などを拾うため、止めはしない）
 const IDLE_REFRESH_MS = 60000;
 
-export function ResultPanel({ runIds, tree, activeRunId }: { runIds: string[]; tree: ProjectNode[]; activeRunId: string | null }) {
+export function ResultPanel({ runIds, tree, activeRunId, onVisibleLabels }: {
+  runIds: string[];
+  tree: ProjectNode[];
+  activeRunId: string | null;
+  // 今表示しているラベルが変わるたびに通知する（画面の構成を Claude に見せるため）
+  onVisibleLabels: (labels: string[]) => void;
+}) {
   const [labels, setLabels] = useState<LabelInfo[]>([]);
   // ラベルの表示・非表示は再読み込みしても残す
   const [selectedLabels, setSelectedLabels] = usePersistentState<Record<string, boolean>>('selectedLabels', {});
@@ -28,6 +35,7 @@ export function ResultPanel({ runIds, tree, activeRunId }: { runIds: string[]; t
   // 差分取得用: runごとの手元の Plot（ポーリング中に最新を参照するため ref に持つ）
   const plotsRef = useRef<Record<string, Plot[]>>({});
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const runMetaMap = useMemo(() => {
     const map: Record<string, RunMeta> = {};
@@ -52,7 +60,15 @@ export function ResultPanel({ runIds, tree, activeRunId }: { runIds: string[]; t
     setPlotsByRun({});
     lastFetchedRef.current = {};
     wasLiveRef.current = {};
-    if (runIds.length === 0) {
+    // 表示中のラベル = 画面に出ているグラフ・画像の見出し（チップがONのもの）
+  const visibleLabels = labels.filter((l) => selectedLabels[l.label] ?? true).map((l) => l.label);
+  const visibleKey = visibleLabels.join('\u0000');
+  useEffect(() => {
+    onVisibleLabels(visibleLabels);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleKey]);
+
+  if (runIds.length === 0) {
       setLabels([]);
       setResultsByRun({});
       return;
@@ -200,6 +216,17 @@ export function ResultPanel({ runIds, tree, activeRunId }: { runIds: string[]; t
     <div className="result-panel">
       {error && <div className="error-banner">{error}</div>}
       <div className="label-checks">
+        <button
+          className="label-chip copy-runs"
+          title="比較中の run_id を1行ずつコピーする（Claude に貼ると、この組み合わせを読める）"
+          onClick={async () => {
+            if (!(await copyText(runIds.join('\n')))) return;
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1200);
+          }}
+        >
+          {copied ? 'コピーしました' : `run_id をコピー（${runIds.length}件）`}
+        </button>
         {labels.map((l) => {
           const on = selectedLabels[l.label] ?? true;
           return (

@@ -225,7 +225,7 @@ button { font: inherit; color: inherit; }
 /* 行ごとの操作ボタン: マウスを乗せた時・行の中にフォーカスがある時だけ表示する */
 /* visibility:hidden だと Tab でフォーカスできなくなるので、透明にするだけにする */
 .row-actions { margin-left: auto; display: flex; gap: 2px; opacity: 0; }
-.tree-row:hover .row-actions, .tree-row:focus-within .row-actions { opacity: 1; }
+.tree-row:hover .row-actions, .tree-row:focus-within .row-actions, .row-actions.shown { opacity: 1; }
 .icon-btn {
   display: inline-flex;
   align-items: center;

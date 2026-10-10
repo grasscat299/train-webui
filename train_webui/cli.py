@@ -7,6 +7,10 @@ DB（train_webui/data/webui.sqlite）と画像フォルダを直接読むので�
     venv/bin/python -m train_webui.cli show <project> <group> [run]
     venv/bin/python -m train_webui.cli plot <project> <group> <label> [run] [--points 50]
     venv/bin/python -m train_webui.cli compare <project> <group1> <group2> [--run1 v1] [--run2 v2]
+    venv/bin/python -m train_webui.cli view [run_id ...] [--config full] [--log N]
+
+- view は、WebUI の画面で今見ている構成（タブ・比較中の run・表示中のラベル）をそのまま読む。run_id を
+  並べると、画面の代わりにその run たちを同じ形で出す（ツリーの📋ボタンでコピーした run_id を貼れる）。
 
 - project はパスの末尾だけでもよい（`world_model_v1` → `src/world_model_v1`）。
 - group は group_id でも group_name でもよい。
@@ -16,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -46,6 +51,18 @@ class Store:
 
     def q(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
         return self.conn.execute(sql, params).fetchall()
+
+    def view_state(self) -> tuple[dict, str] | None:
+        """画面が最後に送ってきた構成と、その時刻。まだ無ければ None（view_state 追加前の DB も含む）"""
+        try:
+            rows = self.q("SELECT data, updated_at FROM view_state WHERE id = 1")
+        except sqlite3.OperationalError:
+            return None
+        return (json.loads(rows[0]["data"]), rows[0]["updated_at"]) if rows else None
+
+    def run_by_id(self, run_id: str) -> sqlite3.Row | None:
+        rows = self.q("SELECT * FROM runs WHERE run_id = ?", (run_id,))
+        return rows[0] if rows else None
 
     def projects(self) -> list[str]:
         return [r["project"] for r in self.q("SELECT DISTINCT project FROM runs ORDER BY project")]
@@ -186,7 +203,8 @@ def cmd_ls(store: Store, project: str | None) -> None:
                 print(f"    {r['display_name']:<4} {r['status']:<9} {r['origin']:<5} {when}  {r['run_id']}")
 
 
-def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int) -> None:
+def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int, labels: set[str] | None = None) -> None:
+    """labels を渡すと、そのラベルのグラフ・画像だけ出す（画面で表示中のものだけ読む時）。"""
     print(f"# {_run_title(store, run)}")
     print(f"run_id: {run['run_id']}  status: {run['status']}  origin: {run['origin']}  group_id: {run['run_group']}")
     print(f"開始: {run['started_at'] or '-'}  終了: {run['ended_at'] or '-'}")
@@ -209,8 +227,11 @@ def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int) -
         print(f"（同じ group の前の run {prev['display_name']} からの差分。全文は --config full）")
         print(diff if diff else "差分なし")
 
-    plots = store.plots(run["run_id"])
-    metrics = store.metrics(run["run_id"])
+    def shown(label: str) -> bool:
+        return labels is None or label in labels
+
+    plots = [p for p in store.plots(run["run_id"]) if shown(p["label"])]
+    metrics = {k: v for k, v in store.metrics(run["run_id"]).items() if shown(k)}
     if plots or metrics:
         print("\n## グラフ")
     for p in plots:
@@ -223,7 +244,7 @@ def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int) -
         print(f"{label}  [log()で送った数値  x: step]")
         print(f"  {_series_summary(pts)}")
 
-    images = store.images(run["run_id"])
+    images = {k: v for k, v in store.images(run["run_id"]).items() if shown(k)}
     if images:
         print("\n## 画像（Read で開ける。新しいものが最後）")
     for label, rows in images.items():
@@ -315,6 +336,43 @@ def cmd_compare(store: Store, run1: sqlite3.Row, run2: sqlite3.Row) -> None:
 # ---------------------------------------------------------------------------
 
 
+def cmd_view(store: Store, run_ids: list[str], config_mode: str, log_lines: int) -> None:
+    if run_ids:
+        tab, labels, stamp = "指定", None, None
+    else:
+        saved = store.view_state()
+        if saved is None:
+            raise CliError("画面の構成がまだ送られていません。WebUI をブラウザで開いてください（開くと自動で送られます）")
+        state, stamp = saved
+        run_ids, tab = state["run_ids"], {"train": "Train", "result": "Result"}[state["tab"]]
+        labels = set(state["labels"]) if state["tab"] == "result" else None
+    runs = []
+    for rid in run_ids:
+        run = store.run_by_id(rid)
+        if run is None:
+            raise CliError(f"run_id が見つかりません: {rid}")
+        runs.append(run)
+    print(f"# WebUI の画面（{tab}タブ" + (f"、{stamp} 時点" if stamp else "") + "）")
+    print(f"対象の run: {len(runs)}件")
+    for run in runs:
+        print(f"  {run['run_id']}  {_run_title(store, run)}  [{run['status']}]")
+    if labels is not None:
+        print("表示中のラベル: " + (", ".join(sorted(labels)) if labels else "（なし）"))
+    for run in runs:
+        print("\n" + "=" * 60)
+        cmd_show(store, run, config_mode, log_lines, labels)
+    if len(runs) >= 2:
+        print("\n" + "=" * 60 + "\n# 数値の比較（最後の値 / 最小値）")
+        values = {run["run_id"]: _last_values(store, run) for run in runs}
+        keys = sorted({k for v in values.values() for k in v if labels is None or k.split("[")[0] in labels})
+        for k in keys:
+            cells = []
+            for run in runs:
+                v = values[run["run_id"]].get(k)
+                cells.append(f"{run['display_name']}: {_fmt(v[0])} / {_fmt(v[1])}" if v else f"{run['display_name']}: -")
+            print(f"{k}\t" + "\t".join(cells))
+
+
 def _open_store(db: str | None) -> Store:
     if db:
         db_path = Path(db)
@@ -355,11 +413,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run1")
     p.add_argument("--run2")
 
+    p = sub.add_parser("view", help="WebUI の画面で今見ている構成をそのまま読む（run_id を並べればその run たち）")
+    p.add_argument("run_ids", nargs="*", metavar="run_id")
+    p.add_argument("--config", choices=["diff", "full"], default="diff")
+    p.add_argument("--log", type=int, default=0, metavar="N")
+
     args = parser.parse_args(argv)
     try:
         store = _open_store(args.db)
         if args.cmd == "ls":
             cmd_ls(store, args.project)
+            return 0
+        if args.cmd == "view":
+            cmd_view(store, args.run_ids, args.config, args.log)
             return 0
         project = store.resolve_project(args.project)
         if args.cmd == "show":

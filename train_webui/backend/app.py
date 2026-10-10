@@ -67,6 +67,13 @@ class CommentRequest(BaseModel):
     comment: str
 
 
+class ViewStateRequest(BaseModel):
+    """画面で今見ている構成。Claude が cli の view で読む。"""
+    tab: Literal["train", "result"]
+    run_ids: list[str]  # Train タブなら選択中の run、Result タブなら比較中の run
+    labels: list[str] = []  # Result タブで表示中のラベル
+
+
 class InferRequest(BaseModel):
     project: str
     group: str
@@ -414,6 +421,11 @@ def create_app(
             raise HTTPException(404, "run が見つかりません")
         db.update_run(run_id, comment=body.comment)
         return _run_detail(db, db.get_run(run_id))
+
+    @app.put("/api/view", status_code=204)
+    def put_view(body: ViewStateRequest) -> Response:
+        db.set_view_state(body.model_dump_json())
+        return Response(status_code=204)
 
     @app.post("/api/runs/{run_id}/start")
     async def start_run(run_id: str) -> dict:

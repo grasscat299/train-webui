@@ -155,6 +155,8 @@ export interface Api {
   getResults(runId: string, kind?: 'metric' | 'image', label?: string): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
   getPlots(runId: string, afterId?: number | null): Promise<Plot[]>;
+  // 画面で今見ている構成を server に送る（Claude が `cli view` で読む）
+  putView(tab: 'train' | 'result', runIds: string[], labels: string[]): Promise<void>;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -224,6 +226,11 @@ const realApi: Api = {
     request<Plot[]>(
       `/api/runs/${encodeURIComponent(runId)}/plots${afterId != null ? `?after_id=${afterId}` : ''}`,
     ),
+  putView: (tab, runIds, labels) =>
+    request<void>('/api/view', {
+      method: 'PUT',
+      body: JSON.stringify({ tab, run_ids: runIds, labels }),
+    }),
 };
 
 // eslint 的に import は先頭に置きたいが、循環を避けるため mock.ts からは型のみを参照させ、

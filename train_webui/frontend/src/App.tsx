@@ -27,6 +27,8 @@ export default function App() {
   const [groupChecked, setGroupChecked] = usePersistentState<Record<string, boolean>>('groupChecked', {});
   const [projectChecked, setProjectChecked] = usePersistentState<Record<string, boolean>>('projectChecked', {});
   const [actionError, setActionError] = useState<string | null>(null);
+  // Result タブで表示中のラベル（ResultPanel が通知してくる）
+  const [visibleLabels, setVisibleLabels] = useState<string[]>([]);
   // テーマ（既定はダーク）。index.html でも同じ保存値を読んで、描画前に data-theme を付けている
   const [theme, setTheme] = usePersistentState<Theme>('theme', 'dark');
   useEffect(() => {
@@ -85,6 +87,19 @@ export default function App() {
     return ids;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [treeData, runChecked]);
+
+  // 画面で今見ている構成を server に送る。Claude が「Result 画面を見て」と言われた時に `cli view` で読む。
+  // 操作のたびに送ると多いので、止まってから送る
+  const viewRunIds = tab === 'train' ? (selectedRunId ? [selectedRunId] : []) : selectedRunIds;
+  const viewKey = JSON.stringify([tab, viewRunIds, tab === 'result' ? visibleLabels : []]);
+  useEffect(() => {
+    if (tree === null || tree === undefined) return; // ツリーを取れてから（消えた run を送らない）
+    const timer = window.setTimeout(() => {
+      api.putView(tab, viewRunIds, tab === 'result' ? visibleLabels : []).catch(() => {});
+    }, 500);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey, tree === null]);
 
   // 右のコメント欄: Train タブでは選択中の run、Result タブでは比較中の run
   const [commentsOpen, setCommentsOpen] = usePersistentState<boolean>('commentsOpen', true);
@@ -204,7 +219,7 @@ export default function App() {
                 }}
               />
             ) : (
-              <ResultPanel runIds={selectedRunIds} tree={treeData} activeRunId={state?.active?.run_id ?? null} />
+              <ResultPanel runIds={selectedRunIds} tree={treeData} activeRunId={state?.active?.run_id ?? null} onVisibleLabels={setVisibleLabels} />
             )}
           </main>
           {/* 閉じている時も出しておき、左へドラッグすれば開き直せる（幅0から広げる扱い） */}

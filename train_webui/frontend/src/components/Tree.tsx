@@ -1,7 +1,9 @@
 import type { GroupNode, ProjectNode, RunSummary } from '../api';
 import { EyeToggle } from './EyeToggle';
 import { usePersistentState } from '../hooks/usePersistentState';
-import { ChevronIcon, IconButton, PencilIcon, PlayIcon, PlusIcon } from './Icons';
+import { useState } from 'react';
+import { copyText } from '../copyText';
+import { CheckIcon, ChevronIcon, CopyIcon, IconButton, PencilIcon, PlayIcon, PlusIcon } from './Icons';
 
 export interface TreeProps {
   tree: ProjectNode[];
@@ -97,6 +99,13 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
   toggleGroup: (project: string, group: string, runs: RunSummary[], val: boolean) => void;
 }) {
   const [open, setOpen] = usePersistentState(`treeOpen.${project}\u0000${node.group}`, true);
+  // 直近にコピーした run（アイコンをチェックにして知らせる）
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyRunId = async (runId: string) => {
+    if (!(await copyText(runId))) return;
+    setCopiedId(runId);
+    window.setTimeout(() => setCopiedId((cur) => (cur === runId ? null : cur)), 1200);
+  };
   return (
     <div className="tree-group">
       <div className="tree-row tree-group-row">
@@ -139,6 +148,11 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
                 </span>
                 {r.origin === 'cli' && <span className="cli-badge">CLI</span>}
               </button>
+              <span className={`row-actions${copiedId === r.run_id ? ' shown' : ''}`}>
+                <IconButton title="run_id をコピー（Claude に貼ると、この run を読める）" onClick={() => copyRunId(r.run_id)}>
+                  {copiedId === r.run_id ? <CheckIcon /> : <CopyIcon />}
+                </IconButton>
+              </span>
             </div>
           ))}
         </div>

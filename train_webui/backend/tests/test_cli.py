@@ -73,3 +73,36 @@ def test_unknown_names_report_candidates(app_factory, capsys):
     assert cli.main(["--db", db, "show", "proj_a", "nope"]) == 1
     assert "候補" in capsys.readouterr().err
     assert cli.main(["--db", db, "show", "proj_a", "g1", "v9"]) == 1
+
+
+def test_view_reads_screen_state_and_run_ids(app_factory, capsys):
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "src/proj_a")
+    client = TestClient(app)
+    ids = [
+        client.post("/api/runs", json={
+            "project": "src/proj_a", "group": "g1", "config_toml": f'[wandb]\ngroup = "g1"\n[train]\nlr = {lr}\n',
+            "hostname": "h", "pid": 1,
+        }).json()["run_id"]
+        for lr in ("1e-3", "1e-4")
+    ]
+    for rid in ids:
+        client.post("/api/results", json={"run_id": rid, "source": "train", "items": [
+            {"kind": "metric", "label": "train/lr", "step": 1, "value": 0.001, "sent_at": T},
+            {"kind": "metric", "label": "train/other", "step": 1, "value": 2.0, "sent_at": T},
+        ]})
+    db = str(settings.server.db_path)
+
+    assert cli.main(["--db", db, "view"]) == 1  # まだ画面の構成が無い
+    assert "WebUI をブラウザで開いてください" in capsys.readouterr().err
+
+    assert client.put("/api/view", json={"tab": "result", "run_ids": ids, "labels": ["train/lr"]}).status_code == 204
+    assert cli.main(["--db", db, "view"]) == 0
+    out = capsys.readouterr().out
+    assert "Resultタブ" in out and ids[0] in out and ids[1] in out
+    assert "train/lr" in out and "train/other" not in out  # 表示中のラベルだけ
+    assert "数値の比較" in out
+
+    assert cli.main(["--db", db, "view", ids[0]]) == 0  # run_id を並べればその run
+    assert "指定" in capsys.readouterr().out
+    assert cli.main(["--db", db, "view", "nope"]) == 1

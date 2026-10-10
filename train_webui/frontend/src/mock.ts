@@ -746,4 +746,5 @@ export const mockApi: Api = {
   getResults,
   getLabels,
   getPlots,
+  putView: async () => {},
 };
