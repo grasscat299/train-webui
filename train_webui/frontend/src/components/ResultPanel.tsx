@@ -61,16 +61,7 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
     setPlotsByRun({});
     lastFetchedRef.current = {};
     wasLiveRef.current = {};
-    // 表示中のラベル = 画面に出ているグラフ・画像の見出し（チップがONのもの）
-  const visibleLabels = labels.filter((l) => selectedLabels[l.label] ?? true).map((l) => l.label);
-  const hiddenLabels = labels.filter((l) => !(selectedLabels[l.label] ?? true)).map((l) => l.label);
-  const visibleKey = visibleLabels.join('\u0000') + '\u0001' + hiddenLabels.join('\u0000');
-  useEffect(() => {
-    onLabelState(visibleLabels, hiddenLabels);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleKey]);
-
-  if (runIds.length === 0) {
+    if (runIds.length === 0) {
       setLabels([]);
       setResultsByRun({});
       return;
@@ -138,6 +129,15 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
+
+  // 表示中のラベル = 画面に出ているグラフ・画像の見出し（チップがONのもの）
+  const visibleLabels = labels.filter((l) => selectedLabels[l.label] ?? true).map((l) => l.label);
+  const hiddenLabels = labels.filter((l) => !(selectedLabels[l.label] ?? true)).map((l) => l.label);
+  const visibleKey = visibleLabels.join('\u0000') + '\u0001' + hiddenLabels.join('\u0000');
+  useEffect(() => {
+    onLabelState(visibleLabels, hiddenLabels);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleKey]);
 
   if (runIds.length === 0) {
     return <div className="panel-empty">左のツリーで比較対象のrunにチェックを入れてください。</div>;
