@@ -406,7 +406,8 @@ def cmd_view(store: Store, run_ids: list[str], config_mode: str, log_lines: int,
             cells = []
             for run in runs:
                 v = values[run["run_id"]].get(k)
-                cells.append(f"{run['display_name']}: {_fmt(v[0])} / {_fmt(v[1])}" if v else f"{run['display_name']}: -")
+                name = f"{run['display_name']}({store.group_names(run['project']).get(run['run_group'], run['run_group'])})"
+                cells.append(f"{name}: {_fmt(v[0])} / {_fmt(v[1])}" if v else f"{name}: -")
             print(f"{k}\t" + "\t".join(cells))
 
 
