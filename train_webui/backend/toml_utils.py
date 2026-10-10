@@ -61,3 +61,46 @@ def set_wandb_group(text: str, new_group: str) -> str:
     if not found:
         raise TomlValidationError("[wandb].group の行が見つかりません")
     return "".join(out_lines)
+
+
+def set_value(text: str, dotted_key: str, literal: str) -> str:
+    """`section.key`（トップレベルは `key`）の既存の行の値だけを TOML リテラル `literal` に書き換える。
+
+    他の行・コメントは保持する。存在しないキーは追加せず TomlValidationError（タイプミス防止）。
+    複数行にわたる値の書き換えは非対応（結果が不正なTOMLになるので検証で弾く）。
+    """
+    section, _, key = dotted_key.rpartition(".")
+    if not key:
+        raise TomlValidationError(f"キーの指定が不正です: {dotted_key!r}")
+    try:
+        tomli.loads(f"v = {literal}")
+    except tomli.TOMLDecodeError as e:
+        raise TomlValidationError(f"値がTOMLのリテラルではありません（文字列は \"...\" で囲む）: {literal!r}") from e
+    key_re = re.compile(
+        r"^(?P<prefix>\s*" + re.escape(key) + r"\s*=\s*)"
+        r'(?:"(?:[^"\\]|\\.)*"|\'[^\']*\'|[^#]*?)'
+        r"(?P<suffix>\s*(?:#.*)?)$"
+    )
+    in_section = section == ""
+    found = False
+    out_lines: list[str] = []
+    for raw_line in text.splitlines(keepends=True):
+        stripped = raw_line.splitlines()[0] if raw_line else ""
+        ending = raw_line[len(stripped):]
+        sec = _SECTION_RE.match(stripped)
+        if sec:
+            in_section = sec.group(1).strip() == section
+            out_lines.append(raw_line)
+            continue
+        if in_section and not found:
+            m = key_re.match(stripped)
+            if m:
+                out_lines.append(f"{m.group('prefix')}{literal}{m.group('suffix')}{ending}")
+                found = True
+                continue
+        out_lines.append(raw_line)
+    if not found:
+        raise TomlValidationError(f"config に {dotted_key} の行がありません（新しいキーの追加は非対応）")
+    result = "".join(out_lines)
+    parse_toml(result)
+    return result
