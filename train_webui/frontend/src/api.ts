@@ -32,6 +32,8 @@ export interface Job {
 }
 
 export interface Run extends RunSummary {
+  // group（=モデル構成）の説明。Markdown。Claude がモデルの作りを知るための文書
+  group_description: string;
   config_toml: string;
   git_commit: string | null;
   git_diff: string | null;
@@ -158,6 +160,7 @@ export interface Api {
   createDraft(project: string, group: string | null, newGroup: boolean): Promise<Run>;
   renameGroup(project: string, group: string, groupName: string): Promise<void>;
   updateComment(runId: string, comment: string): Promise<Run>;
+  updateGroupDescription(project: string, group: string, description: string): Promise<void>;
   getRun(runId: string): Promise<Run>;
   updateConfig(runId: string, configToml: string): Promise<Run>;
   startRun(runId: string): Promise<Run>;
@@ -209,6 +212,11 @@ const realApi: Api = {
     request<Run>(`/api/runs/${encodeURIComponent(runId)}/comment`, {
       method: 'PUT',
       body: JSON.stringify({ comment }),
+    }),
+  updateGroupDescription: (project, group, description) =>
+    request<void>('/api/groups/description', {
+      method: 'PUT',
+      body: JSON.stringify({ project, group, description }),
     }),
   renameGroup: (project, group, groupName) =>
     request<void>('/api/groups', {

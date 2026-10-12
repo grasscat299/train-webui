@@ -485,6 +485,12 @@ runをクリックすると右のメインパネルに、そのrunの**状態に
   run のチェックとラベルの表示・非表示がそのまま復元される（その後 run やラベルを変えると「変更あり」と出る）。
   保存した run が後で削除されていても比較自体は残り、復元時は残っている run だけがONになる。
   `cli comparisons` で一覧、`cli view --comparison <名前>` で読める。左ナビの縦スクロールバーは表示しない（スクロールはできる）。
+- **モデルの説明（group ごと）**: group（=モデル構成）に Markdown の説明を持たせる（DB の `groups.description`、
+  API は `PUT /api/groups/description`、run の詳細に `group_description` が付く）。**読み手は主に Claude**で、モデルが
+  どう作られているか（構成・入力と出力・損失・他の group との違い）を知るための知識。Train タブ上部の折りたたみ欄で編集
+  （未記入なら開いた状態、欄の外クリックか Ctrl+Enter で保存）。同じ group の run すべてで共通。`cli show` / `view` /
+  `compare` の先頭に出し（同じ group は1回）、`cli ls` では未記入の group に `[モデルの説明なし]` を付ける。
+  Claude は `ctl describe` で書ける。
 - **画面の構成を Claude に見せる**: ブラウザは、今見ている構成（タブ・Train なら選択中の run・Result なら比較中の
   run と表示中のラベル）を、変わるたびに（500ms 待ってから）`PUT /api/view` で送る。DB の `view_state`（1行）に保存され、
   `cli view` がそれを読む（server が止まっていても読める）。送り元のブラウザが複数あれば最後に送った方が残る。
