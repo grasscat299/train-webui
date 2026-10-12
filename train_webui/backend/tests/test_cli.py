@@ -1,5 +1,7 @@
 import base64
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from train_webui import cli
@@ -139,3 +141,43 @@ def test_comparisons_crud_and_cli(app_factory, capsys):
 
     assert client.delete(f"/api/comparisons/{cmp['id']}").status_code == 204
     assert client.get("/api/comparisons").json() == []
+
+
+def test_group_description_api_cli_and_ctl(app_factory, capsys):
+    import argparse
+
+    from train_webui import ctl
+    from .test_ctl import _FakeApi
+
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "src/proj_a")
+    client = TestClient(app)
+    db = str(settings.server.db_path)
+    ids = [
+        client.post("/api/runs", json={
+            "project": "src/proj_a", "group": "g1", "config_toml": '[wandb]\ngroup = "g1"\n',
+            "hostname": "h", "pid": 1,
+        }).json()["run_id"]
+        for _ in range(2)
+    ]
+    assert cli.main(["--db", db, "ls"]) == 0
+    assert "[モデルの説明なし]" in capsys.readouterr().out
+    assert cli.main(["--db", db, "show", "proj_a", "g1"]) == 0
+    assert "未記入" in capsys.readouterr().out
+
+    assert client.get(f"/api/runs/{ids[0]}").json()["group_description"] == ""
+    assert client.put("/api/groups/description", json={"project": "src/proj_a", "group": "nope", "description": "x"}).status_code == 404
+
+    api = _FakeApi(client)
+    ctl.cmd_describe(api, argparse.Namespace(project="proj_a", group="g1", text="# 概要\nDiT 6層", file=None))
+    assert client.get(f"/api/runs/{ids[1]}").json()["group_description"] == "# 概要\nDiT 6層"
+    with pytest.raises(ctl.CtlError):
+        ctl.cmd_describe(api, argparse.Namespace(project="proj_a", group="zzz", text="x", file=None))
+
+    assert cli.main(["--db", db, "ls"]) == 0
+    assert "[モデルの説明なし]" not in capsys.readouterr().out
+    assert cli.main(["--db", db, "show", "proj_a", "g1"]) == 0
+    assert "DiT 6層" in capsys.readouterr().out
+    # 同じ group の run を並べても、説明は1回だけ出る
+    assert cli.main(["--db", db, "view", *ids]) == 0
+    assert capsys.readouterr().out.count("DiT 6層") == 1

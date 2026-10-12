@@ -702,3 +702,10 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
 .comparison-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .comparison-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .comparison-btn.danger:hover:not(:disabled) { border-color: #d66; color: #d66; }
+
+/* ---- group（モデル構成）の説明 ---- */
+.group-description { margin-bottom: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); padding: 6px 10px; }
+.group-description summary { cursor: pointer; font-size: 13px; }
+.group-description-empty { margin-left: 8px; color: var(--accent); font-size: 12px; }
+.group-description-hint { color: var(--muted); font-size: 12px; margin: 6px 0; }
+.group-description-editor { width: 100%; font-family: var(--mono); font-size: 12px; resize: vertical; box-sizing: border-box; }

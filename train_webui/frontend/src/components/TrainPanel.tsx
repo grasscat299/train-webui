@@ -1,3 +1,4 @@
+import { GroupDescription } from './GroupDescription';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { waitUntilVisible } from '../hooks/visibility';
@@ -177,6 +178,13 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
 
   return (
     <div className="train-detail">
+      <GroupDescription
+        project={run.project}
+        group={run.group}
+        groupName={run.group_name}
+        value={run.group_description}
+        onSaved={onRunChanged}
+      />
       <div className="run-header">
         <div>
           <div className="run-title">

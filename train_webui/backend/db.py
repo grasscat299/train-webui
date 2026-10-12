@@ -164,6 +164,10 @@ class Database:
             for r in rows:
                 name = self._next_display_name(conn, r["project"], r["run_group"])
                 conn.execute("UPDATE runs SET display_name = ? WHERE run_id = ?", (name, r["run_id"]))
+            # group の説明（モデルの構成を書いた Markdown。Claude が読む）の追加前のDBは空文字で移行
+            gcols = {r["name"] for r in conn.execute("PRAGMA table_info(groups)").fetchall()}
+            if "description" not in gcols:
+                conn.execute("ALTER TABLE groups ADD COLUMN description TEXT NOT NULL DEFAULT ''")
             # groups 追加前のDBの移行: run にある group を、今の名前をそのまま group_name にして登録する
             conn.execute(
                 "INSERT OR IGNORE INTO groups (project, group_id, group_name, created_at) "
@@ -211,6 +215,18 @@ class Database:
         with self._connect() as conn:
             conn.execute(
                 "UPDATE groups SET group_name = ? WHERE project = ? AND group_id = ?", (group_name, project, group_id),
+            )
+
+    def group_descriptions(self, project: str) -> dict[str, str]:
+        """{group_id: description}（モデルの構成の説明。Markdown）"""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT group_id, description FROM groups WHERE project = ?", (project,)).fetchall()
+        return {r["group_id"]: r["description"] for r in rows}
+
+    def set_group_description(self, project: str, group_id: str, description: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE groups SET description = ? WHERE project = ? AND group_id = ?", (description, project, group_id),
             )
 
     def next_group_name(self, project: str) -> str:

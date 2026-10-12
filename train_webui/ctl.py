@@ -5,11 +5,14 @@ server が起動している必要がある。リポジトリ直下から実行�
 
     venv/bin/python -m train_webui.ctl draft <project> [--group G | --new-group] [--name N]
     venv/bin/python -m train_webui.ctl set <run_id> section.key=<TOMLリテラル> [...]
+    venv/bin/python -m train_webui.ctl describe <project> <group> (--file パス | --text 文章 | 標準入力)
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
     venv/bin/python -m train_webui.ctl start <run_id>
     venv/bin/python -m train_webui.ctl infer <project> <group>
     venv/bin/python -m train_webui.ctl stop <run_id>
 
+- `describe` は group（=モデル構成）の説明（Markdown）を上書きする。group は group_id でも表示名でもよい。
+  モデルの作りを Claude が後から読めるようにするためのもの。新しいモデルを作ったら書く。
 - `draft` は新しい下書き run を作って run_id を出す（config は WebUI の「新規 run」と同じ作り方）。
 - `set` は draft の config の既存キーの値だけを書き換える（`train.lr=3e-4` `train.name="a"` `train.use_x=true`）。
   値は TOML のリテラルなので、文字列は引用符で囲む。
@@ -86,6 +89,26 @@ def cmd_set(api: Api, args: argparse.Namespace) -> None:
     print(diff if diff else "変更なし")
 
 
+def cmd_describe(api: Api, args: argparse.Namespace) -> None:
+    if args.text is not None:
+        text = args.text
+    elif args.file:
+        text = open(args.file, encoding="utf-8").read()
+    else:
+        text = sys.stdin.read()
+    tree = api.call("GET", "/api/tree")
+    project = next((n for n in tree if n["project"] == args.project or n["project"].endswith("/" + args.project)), None)
+    if project is None:
+        raise CtlError(f"project が見つかりません: {args.project}（候補: {', '.join(n['project'] for n in tree)}）")
+    hits = [g for g in project["groups"] if args.group in (g["group"], g["group_name"])]
+    if len(hits) != 1:
+        candidates = ", ".join("%s(%s)" % (g["group_name"], g["group"]) for g in project["groups"])
+        raise CtlError(f"group が{'見つかりません' if not hits else '複数あります'}: {args.group}（候補: {candidates}）")
+    api.call("PUT", "/api/groups/description",
+             {"project": project["project"], "group": hits[0]["group"], "description": text})
+    print(f"{project['project']} / {hits[0]['group_name']} の説明を保存しました（{len(text)}文字）")
+
+
 def cmd_comment(api: Api, args: argparse.Namespace) -> None:
     _show_run(api.call("PUT", f"/api/runs/{args.run_id}/comment", {"comment": args.text}))
 
@@ -119,6 +142,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("run_id")
     s.add_argument("assignments", nargs="+", metavar="section.key=値")
     s.set_defaults(func=cmd_set)
+
+    s = sub.add_parser("describe", help="group（モデル構成）の説明（Markdown）を書く")
+    s.add_argument("project")
+    s.add_argument("group")
+    s.add_argument("--file", help="説明を書いたファイル")
+    s.add_argument("--text", help="説明の文章（省略時は --file、それも無ければ標準入力）")
+    s.set_defaults(func=cmd_describe)
 
     s = sub.add_parser("comment", help="run にコメントを書く（上書き）")
     s.add_argument("run_id")

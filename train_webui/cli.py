@@ -103,6 +103,14 @@ class Store:
         rows = self.q("SELECT group_id, group_name FROM groups WHERE project = ?", (project,))
         return {r["group_id"]: r["group_name"] for r in rows}
 
+    def group_description(self, project: str, group: str) -> str:
+        """group（=モデル構成）の説明（Markdown）。description 列の追加前の DB や未記入は空文字"""
+        try:
+            rows = self.q("SELECT description FROM groups WHERE project = ? AND group_id = ?", (project, group))
+        except sqlite3.OperationalError:
+            return ""
+        return (rows[0]["description"] if rows else "") or ""
+
     def resolve_group(self, project: str, name: str) -> str:
         ids = [r["run_group"] for r in self.q("SELECT DISTINCT run_group FROM runs WHERE project = ?", (project,))]
         if name in ids:
@@ -218,17 +226,37 @@ def cmd_ls(store: Store, project: str | None) -> None:
                         key=lambda g: names.get(g, g))
         for g in groups:
             label = names.get(g, g)
-            print(f"  {label}" + (f"  (group_id: {g})" if label != g else ""))
+            note = "" if store.group_description(p, g).strip() else "  [モデルの説明なし]"
+            print(f"  {label}" + (f"  (group_id: {g})" if label != g else "") + note)
             for r in store.runs_in_group(p, g):
                 when = (r["started_at"] or r["created_at"])[:16].replace("T", " ")
                 print(f"    {r['display_name']:<4} {r['status']:<9} {r['origin']:<5} {when}  {r['run_id']}")
 
 
-def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int, labels: set[str] | None = None) -> None:
+def print_descriptions(store: Store, runs: list[sqlite3.Row]) -> None:
+    """runs の group（=モデル構成）ごとの説明を、重複なく1回ずつ出す。"""
+    seen: set[tuple[str, str]] = set()
+    for run in runs:
+        key = (run["project"], run["run_group"])
+        if key in seen:
+            continue
+        seen.add(key)
+        gname = store.group_names(run["project"]).get(run["run_group"], run["run_group"])
+        text = store.group_description(*key).strip()
+        print(f"## モデルの説明: {run['project']} / {gname}")
+        print(text if text else "（未記入。WebUI の Train タブか `ctl describe` で書ける）")
+        print()
+
+
+def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int, labels: set[str] | None = None,
+             describe: bool = True) -> None:
     """labels を渡すと、そのラベルのグラフ・画像だけ出す（画面で表示中のものだけ読む時）。"""
     print(f"# {_run_title(store, run)}")
     print(f"run_id: {run['run_id']}  status: {run['status']}  origin: {run['origin']}  group_id: {run['run_group']}")
     print(f"開始: {run['started_at'] or '-'}  終了: {run['ended_at'] or '-'}")
+    if describe:
+        print()
+        print_descriptions(store, [run])
     if _comment(run):
         print("コメント:")
         for line in _comment(run).splitlines():
@@ -324,7 +352,8 @@ def _last_values(store: Store, run: sqlite3.Row) -> dict[str, tuple[float, float
 
 def cmd_compare(store: Store, run1: sqlite3.Row, run2: sqlite3.Row) -> None:
     t1, t2 = _run_title(store, run1), _run_title(store, run2)
-    print(f"# 比較\n  A: {t1}  ({run1['run_id']})\n  B: {t2}  ({run2['run_id']})")
+    print(f"# 比較\n  A: {t1}  ({run1['run_id']})\n  B: {t2}  ({run2['run_id']})\n")
+    print_descriptions(store, [run1, run2])
     for tag, run in (("A", run1), ("B", run2)):
         if _comment(run):
             print(f"  {tag} のコメント: " + _comment(run).replace("\n", " / "))
@@ -395,9 +424,11 @@ def cmd_view(store: Store, run_ids: list[str], config_mode: str, log_lines: int,
         print(f"  {run['run_id']}  {_run_title(store, run)}  [{run['status']}]")
     if labels is not None:
         print("表示中のラベル: " + (", ".join(sorted(labels)) if labels else "（なし）"))
+    print()
+    print_descriptions(store, runs)
     for run in runs:
         print("\n" + "=" * 60)
-        cmd_show(store, run, config_mode, log_lines, labels)
+        cmd_show(store, run, config_mode, log_lines, labels, describe=False)
     if len(runs) >= 2:
         print("\n" + "=" * 60 + "\n# 数値の比較（最後の値 / 最小値）")
         values = {run["run_id"]: _last_values(store, run) for run in runs}

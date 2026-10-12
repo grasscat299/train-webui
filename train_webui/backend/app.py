@@ -60,6 +60,12 @@ class GroupRenameRequest(BaseModel):
     group_name: str
 
 
+class GroupDescriptionRequest(BaseModel):
+    project: str
+    group: str  # group_id
+    description: str
+
+
 class ConfigRequest(BaseModel):
     config_toml: str
 
@@ -160,6 +166,7 @@ def _job_public(row: dict) -> dict:
 def _run_detail(db: Database, row: dict) -> dict:
     detail = _run_summary(row, db.group_names(row["project"]).get(row["run_group"]))
     detail.update({
+        "group_description": db.group_descriptions(row["project"]).get(row["run_group"], ""),
         "config_toml": row["config_toml"], "git_commit": row["git_commit"], "git_diff": row["git_diff"],
         "git_untracked": row["git_untracked"], "git_info_source": row["git_info_source"],
         "hostname": row["hostname"], "pid": row["pid"], "last_heartbeat_at": row["last_heartbeat_at"],
@@ -396,6 +403,14 @@ def create_app(
             raise HTTPException(404, "group が見つかりません")
         db.rename_group(body.project, body.group, name)
         return {"project": body.project, "group": body.group, "group_name": name}
+
+    @app.put("/api/groups/description")
+    def set_group_description(body: GroupDescriptionRequest) -> dict:
+        """group（=モデル構成）の説明。run の状態によらずいつでも書き換えられる。"""
+        if not db.group_exists(body.project, body.group):
+            raise HTTPException(404, "group が見つかりません")
+        db.set_group_description(body.project, body.group, body.description)
+        return {"project": body.project, "group": body.group, "description": body.description}
 
     @app.get("/api/runs/resolve")
     def resolve_run(project: str, group: str) -> dict:

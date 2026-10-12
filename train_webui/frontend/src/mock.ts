@@ -18,12 +18,14 @@ import type {
   Plot,
 } from './api';
 
-type StoredRun = Omit<Run, 'jobs' | 'group_name'>;
+type StoredRun = Omit<Run, 'jobs' | 'group_name' | 'group_description'>;
 
 // group の表示名（backend の groups テーブル相当）。未登録の group は group_id をそのまま表示名にする
 const groupNames = new Map<string, string>();
 const groupKeyOf = (project: string, group: string) => `${project}\u0000${group}`;
 const groupNameOf = (project: string, group: string) => groupNames.get(groupKeyOf(project, group)) ?? group;
+const groupDescriptions = new Map<string, string>();
+const groupDescriptionOf = (project: string, group: string) => groupDescriptions.get(groupKeyOf(project, group)) ?? '';
 
 let seq = 0;
 function nextId(): number {
@@ -180,7 +182,7 @@ function getOrThrow(runId: string): StoredRun {
 }
 
 function cloneRun(run: StoredRun): Run {
-  return { ...run, group_name: groupNameOf(run.project, run.group), jobs: (jobsByRun.get(run.run_id) ?? []).slice() };
+  return { ...run, group_name: groupNameOf(run.project, run.group), group_description: groupDescriptionOf(run.project, run.group), jobs: (jobsByRun.get(run.run_id) ?? []).slice() };
 }
 
 function toSummary(run: StoredRun): RunSummary {
@@ -726,6 +728,10 @@ async function updateComment(runId: string, comment: string): Promise<Run> {
   return cloneRun(run);
 }
 
+async function updateGroupDescription(project: string, group: string, description: string): Promise<void> {
+  groupDescriptions.set(groupKeyOf(project, group), description);
+}
+
 async function renameGroup(project: string, group: string, groupName: string): Promise<void> {
   groupNames.set(groupKeyOf(project, group), groupName.trim());
 }
@@ -756,6 +762,7 @@ export const mockApi: Api = {
   createDraft,
   renameGroup,
   updateComment,
+  updateGroupDescription,
   getRun,
   updateConfig,
   startRun,
