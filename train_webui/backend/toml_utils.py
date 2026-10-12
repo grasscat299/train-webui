@@ -63,10 +63,12 @@ def set_wandb_group(text: str, new_group: str) -> str:
     return "".join(out_lines)
 
 
-def set_value(text: str, dotted_key: str, literal: str) -> str:
+def set_value(text: str, dotted_key: str, literal: str, add_missing: bool = False) -> str:
     """`section.key`（トップレベルは `key`）の既存の行の値だけを TOML リテラル `literal` に書き換える。
 
     他の行・コメントは保持する。存在しないキーは追加せず TomlValidationError（タイプミス防止）。
+    add_missing=True なら、無いキーは既存の section の見出しの直後に1行足す（推論時の上書き用。
+    コード側で後から増えた既定値つきのキーを、古い run の config に足すため）。section が無ければエラー。
     複数行にわたる値の書き換えは非対応（結果が不正なTOMLになるので検証で弾く）。
     """
     section, _, key = dotted_key.rpartition(".")
@@ -99,6 +101,13 @@ def set_value(text: str, dotted_key: str, literal: str) -> str:
                 found = True
                 continue
         out_lines.append(raw_line)
+    if not found and add_missing and section:
+        for i, line in enumerate(out_lines):
+            sec = _SECTION_RE.match(line.splitlines()[0] if line else "")
+            if sec and sec.group(1).strip() == section:
+                out_lines.insert(i + 1, f"{key} = {literal}\n")
+                found = True
+                break
     if not found:
         raise TomlValidationError(f"config に {dotted_key} の行がありません（新しいキーの追加は非対応）")
     result = "".join(out_lines)

@@ -26,7 +26,7 @@ from .ids import new_group_id, new_run_id
 from .jobs import JobBusyError, JobManager
 from .remote.types import RemoteControllerProtocol
 from .settings import Settings
-from .toml_utils import TomlValidationError, extract_group, set_wandb_group
+from .toml_utils import TomlValidationError, extract_group, set_value, set_wandb_group
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
@@ -99,6 +99,9 @@ class ComparisonUpdate(BaseModel):
 class InferRequest(BaseModel):
     project: str
     group: str
+    # その推論ジョブに渡す config だけを書き換える（run に保存された config は変えない）。
+    # `section.key=TOMLリテラル` の並び。無いキーは section の中に足す。
+    overrides: list[str] = []
 
 
 class ClientRunCreate(BaseModel):
@@ -551,12 +554,21 @@ def create_app(
         target = db.find_latest_train_run(body.project, body.group)
         if target is None:
             raise HTTPException(404, "対象のrunが見つかりません")
+        config_toml = target["config_toml"]
+        for assignment in body.overrides:
+            key, eq, literal = assignment.partition("=")
+            if not eq:
+                raise HTTPException(400, f"`section.key=値` の形で指定してください: {assignment!r}")
+            try:
+                config_toml = set_value(config_toml, key.strip(), literal.strip(), add_missing=True)
+            except TomlValidationError as e:
+                raise HTTPException(400, str(e)) from e
         busy, _active = job_manager.get_busy_state()
         if busy:
             raise HTTPException(409, "GPUを使用中の別のジョブがあります")
         await run_in_threadpool(check_gpu_free)
         try:
-            job = await run_in_threadpool(job_manager.start_infer, target["run_id"], body.project)
+            job = await run_in_threadpool(job_manager.start_infer, target["run_id"], body.project, config_toml)
         except JobBusyError as e:
             raise HTTPException(409, str(e)) from e
         return _job_public(job)

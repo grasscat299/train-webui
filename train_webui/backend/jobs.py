@@ -119,11 +119,14 @@ class JobManager:
         except Exception as e:  # noqa: BLE001 - remoteの失敗は種類を問わずfailedにする
             self._fail_job_and_run(job_id, run_id, str(e), also_run=True)
 
-    def start_infer(self, run_id: str, project: str) -> dict:
-        """groupの[infer]ボタン。対象runは変えず、jobだけ作って起動する。"""
+    def start_infer(self, run_id: str, project: str, config_toml: str | None = None) -> dict:
+        """groupの[infer]ボタン。対象runは変えず、jobだけ作って起動する。
+        config_toml を渡すとそのjobだけその config で動かす（ctl infer --set の上書き）。"""
         run = self._db.get_run(run_id)
         if run is None:
             raise ValueError("run が見つかりません")
+        if config_toml is not None:
+            run = {**run, "config_toml": config_toml}
         job_id = self._reserve_job(run_id, kind="infer")
         self._spawn(self._launch_infer, run_id, job_id, run, project)
         job = self._db.get_job(job_id)

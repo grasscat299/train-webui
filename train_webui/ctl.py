@@ -8,7 +8,7 @@ server が起動している必要がある。リポジトリ直下から実行�
     venv/bin/python -m train_webui.ctl describe <project> <group> (--file パス | --text 文章 | 標準入力)
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
     venv/bin/python -m train_webui.ctl start <run_id>
-    venv/bin/python -m train_webui.ctl infer <project> <group>
+    venv/bin/python -m train_webui.ctl infer <project> <group> [--set section.key=<TOMLリテラル> ...]
     venv/bin/python -m train_webui.ctl stop <run_id>
 
 - `describe` は group（=モデル構成）の説明（Markdown）を上書きする。group は group_id でも表示名でもよい。
@@ -16,6 +16,8 @@ server が起動している必要がある。リポジトリ直下から実行�
 - `draft` は新しい下書き run を作って run_id を出す（config は WebUI の「新規 run」と同じ作り方）。
 - `set` は draft の config の既存キーの値だけを書き換える（`train.lr=3e-4` `train.name="a"` `train.use_x=true`）。
   値は TOML のリテラルなので、文字列は引用符で囲む。
+- `infer --set` はその推論ジョブに渡す config だけを書き換える（run に保存された config は変えない）。
+  無いキーは section の中に足す（例: `--set 'infer.mode="eval"' --set infer.eval_n=200`）。
 - `start` / `infer` は GPU が使用中なら server が断る。
 """
 from __future__ import annotations
@@ -122,7 +124,8 @@ def cmd_stop(api: Api, args: argparse.Namespace) -> None:
 
 
 def cmd_infer(api: Api, args: argparse.Namespace) -> None:
-    job = api.call("POST", "/api/groups/infer", {"project": args.project, "group": args.group})
+    job = api.call("POST", "/api/groups/infer",
+                   {"project": args.project, "group": args.group, "overrides": args.overrides})
     print(json.dumps(job, ensure_ascii=False, indent=2))
 
 
@@ -166,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("infer", help="group の最新の学習済み run で推論する")
     s.add_argument("project")
     s.add_argument("group")
+    s.add_argument("--set", dest="overrides", action="append", default=[], metavar="section.key=値",
+                   help="この推論だけ config を上書き（run の config は変えない。無いキーは section に足す）")
     s.set_defaults(func=cmd_infer)
 
     args = p.parse_args(argv)

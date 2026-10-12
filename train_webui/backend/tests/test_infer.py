@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 from .conftest import write_project
 
 
-def _finished_train_run(client, remote, app, settings, group="g1"):
-    write_project(settings.repo_root, "proj_a")
+def _finished_train_run(client, remote, app, settings, group="g1", config_text=None):
+    write_project(settings.repo_root, "proj_a", config_text=config_text)
     run = client.post("/api/runs/draft", json={"project": "proj_a", "group": group, "new_group": True}).json()
     client.post(f"/api/runs/{run['run_id']}/start")
     pid = next(iter(remote.poll_results))
@@ -64,3 +64,31 @@ def test_infer_poll_finishes_job_without_changing_run_status(app_factory):
     assert got["status"] == "finished"
     infer_job = next(j for j in got["jobs"] if j["job_id"] == job_id)
     assert infer_job["status"] == "finished"
+
+
+def test_infer_overrides_only_job_config(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    config_text = '[infer]\nnum_samples = 4\n\n[wandb]\nproject = "p"\ngroup = "g1"\n'
+    run = _finished_train_run(client, remote, app, settings, config_text=config_text)
+    before = client.get(f"/api/runs/{run['run_id']}").json()["config_toml"]
+
+    resp = client.post("/api/groups/infer", json={
+        "project": "proj_a", "group": "g1", "overrides": ['infer.mode="eval"', "infer.num_samples=200"],
+    })
+    assert resp.status_code == 200
+    spec = remote.launches[-1]
+    assert spec.kind == "infer"
+    assert 'mode = "eval"' in spec.config_toml  # 無いキーは [infer] に足される
+    assert "num_samples = 200" in spec.config_toml
+    assert client.get(f"/api/runs/{run['run_id']}").json()["config_toml"] == before  # run は変えない
+
+
+def test_infer_overrides_bad_key_400(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    _finished_train_run(client, remote, app, settings)
+    resp = client.post("/api/groups/infer", json={
+        "project": "proj_a", "group": "g1", "overrides": ["nosection.x=1"],
+    })
+    assert resp.status_code == 400
