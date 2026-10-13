@@ -262,3 +262,8 @@ design.md §7〜9 のとおり。追加の取り決め：
     その系列には「間引き表示中（元 {total_points} 点 → 表示 {points.length} 点）」を表示する。
   - `VITE_MOCK=1` のモックモードにも Plot のモックデータ（line と scatter を1つずつ）を足す。
 - 見た目は簡素でよいが、左ツリー・タブ・状態表示が一目で分かること。
+
+## 追記: 表（table）
+- Item（table）: `{"kind": "table", "label": "eval/summary", "name": "acc", "value": 0.9, "step": null, "sent_at": "..."}`。`results` に `kind="table"`・`name` 列つきで保存。Result にも `name` が付く。
+- `GET /api/labels` の kind は `"table"` も返す。同じ run で表の label を metric/image/plot と共用すると 400。
+- client は `log_table(table, {指標名: 値})`。表示は行=指標名・列=run で、同じ指標名は最新の値。

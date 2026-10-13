@@ -234,6 +234,21 @@ class _Client:
                 "value": value, "sent_at": sent_at,
             })
 
+    def log_table(self, table: str, data: dict) -> None:
+        if not self.can_send:
+            return
+        sent_at = _now_iso()
+        for name, value in data.items():
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                _warn(f"数値に変換できない値のため破棄しました(table={table}, name={name}, type={type(value).__name__})")
+                continue
+            self._queue.put({
+                "kind": "table", "label": table, "name": str(name), "step": None,
+                "value": value, "sent_at": sent_at,
+            })
+
     def log_image(self, label: str, fig_or_path, step: int | None) -> None:
         if not self.can_send:
             return
@@ -449,6 +464,16 @@ def log(data: dict, step: int | None) -> None:
         _client.log(data, step)
     except Exception as e:
         _warn(f"logの処理に失敗しました: {e}")
+
+
+def log_table(table: str, data: dict) -> None:
+    if _client is None:
+        _warn("init前にlog_tableが呼ばれたため無視します。")
+        return
+    try:
+        _client.log_table(table, data)
+    except Exception as e:
+        _warn(f"log_tableの処理に失敗しました: {e}")
 
 
 def log_image(label: str, fig_or_path, step: int | None) -> None:

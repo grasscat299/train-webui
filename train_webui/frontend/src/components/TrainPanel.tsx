@@ -6,6 +6,7 @@ import type { ImageResult, MetricResult, Plot, Result, Run } from '../api';
 import { LogView } from './LogView';
 import { MetricChart } from './MetricChart';
 import { ImageViewer } from './ImageViewer';
+import { ResultTable } from './ResultTable';
 import { PlotChart, mergePlots } from './PlotChart';
 import { PanelSections } from './PanelSections';
 import type { PanelItem } from './PanelSections';
@@ -92,6 +93,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
   if (!run) return <div className="panel-empty">読み込み中...</div>;
 
   const metricLabels = uniqueLabels(results.filter((r) => r.kind === 'metric'));
+  const tableLabels = uniqueLabels(results.filter((r) => r.kind === 'table'));
   const imageLabels = uniqueLabels(results.filter((r) => r.kind === 'image'));
   const mainTrainJob = run.jobs.find((j) => j.kind === 'train');
   const inferJobs = run.jobs.filter((j) => j.kind === 'infer');
@@ -166,6 +168,10 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
           series={[{ runId: run.run_id, label: run.display_name, points: results.filter((r): r is MetricResult => r.kind === 'metric' && r.label === label) }]}
         />
       ),
+    })),
+    ...tableLabels.map((label) => ({
+      label,
+      content: <ResultTable label={label} columns={[{ runId: run.run_id, runLabel: run.display_name, results }]} />,
     })),
     ...imageLabels.map((label) => ({
       label,

@@ -513,6 +513,13 @@ details.block:not([open]) > .block-title { margin-bottom: 0; }
 }
 .label-chip.on { color: var(--text); text-decoration: none; border-color: var(--border-strong); }
 
+/* 表（log_table） */
+.result-table { border-collapse: collapse; font-size: 12px; }
+.result-table th, .result-table td { border: 1px solid var(--border); padding: 3px 10px; text-align: right; }
+.result-table th { font-weight: 600; background: var(--panel); }
+.result-table tbody th { text-align: left; }
+.result-table td { font-family: var(--mono); }
+
 /* グラフの高さ（表示設定） */
 .chart-box { height: var(--chart-height, 220px); }
 

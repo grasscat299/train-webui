@@ -5,7 +5,7 @@ import inspect
 
 from . import _core
 
-__all__ = ["init", "log", "log_image", "define_plot", "log_xy", "Plot", "finish"]
+__all__ = ["init", "log", "log_image", "log_table", "define_plot", "log_xy", "Plot", "finish"]
 
 
 def init(new_run: bool = False, run_id: str | None = None, source: str | None = None) -> None:
@@ -17,6 +17,11 @@ def init(new_run: bool = False, run_id: str | None = None, source: str | None = 
 def log(data: dict, step: int | None = None) -> None:
     """数値系列を送る。キューに積むだけで即returnする。"""
     _core.log(data, step)
+
+
+def log_table(table: str, data: dict) -> None:
+    """表に1つずつの値を送る。data は {指標名: 値}。同じ指標名を再送すると新しい値が表に出る。"""
+    _core.log_table(table, data)
 
 
 def log_image(label: str, fig_or_path, step: int | None = None) -> None:

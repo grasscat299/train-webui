@@ -69,7 +69,20 @@ export interface ImageResult {
   sent_at: string;
 }
 
-export type Result = MetricResult | ImageResult;
+// 表の1マス（表 label の中の name 行）。同じ name が複数あれば sent_at が新しいものを表に出す。
+export interface TableResult {
+  id: number;
+  run_id: string;
+  kind: 'table';
+  label: string;
+  name: string;
+  step: number | null;
+  value: number;
+  source: string;
+  sent_at: string;
+}
+
+export type Result = MetricResult | ImageResult | TableResult;
 
 // 軸つきグラフ（design.md §5.3）。downsampled=true の系列は points が間引き済みの全体（差分ではない）。
 export interface PlotSeries {
@@ -121,7 +134,7 @@ export interface StateResp {
 
 export interface LabelInfo {
   label: string;
-  kind: 'metric' | 'image' | 'plot';
+  kind: 'metric' | 'image' | 'table' | 'plot';
 }
 
 // Result タブで名前を付けて残した比較（比較する run と、表示中・非表示のラベル）
@@ -168,7 +181,7 @@ export interface Api {
   deleteRun(runId: string): Promise<void>;
   groupInfer(project: string, group: string): Promise<Job>;
   getJobLog(jobId: string, offset: number): Promise<JobLogResp>;
-  getResults(runId: string, kind?: 'metric' | 'image', label?: string): Promise<Result[]>;
+  getResults(runId: string, kind?: 'metric' | 'image' | 'table', label?: string): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
   getPlots(runId: string, afterId?: number | null): Promise<Plot[]>;
   // 画面で今見ている構成を server に送る（Claude が `cli view` で読む）

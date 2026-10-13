@@ -176,6 +176,16 @@ class Store:
             out.setdefault(r["label"], []).append(r)
         return out
 
+    def tables(self, run_id: str) -> dict[str, dict[str, float]]:
+        """{表label: {指標名: 最新の値}}"""
+        out: dict[str, dict[str, float]] = {}
+        for r in self.q(
+            "SELECT label, name, value FROM results WHERE run_id = ? AND kind = 'table' ORDER BY sent_at, id",
+            (run_id,),
+        ):
+            out.setdefault(r["label"], {})[r["name"]] = r["value"]
+        return out
+
     def jobs(self, run_id: str) -> list[sqlite3.Row]:
         return self.q("SELECT * FROM jobs WHERE run_id = ? ORDER BY started_at", (run_id,))
 
@@ -292,6 +302,14 @@ def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int, l
         pts = [(i, float(s), v) for i, (s, v) in enumerate(values)]
         print(f"{label}  [log()で送った数値  x: step]")
         print(f"  {_series_summary(pts)}")
+
+    tables = {k: v for k, v in store.tables(run["run_id"]).items() if shown(k)}
+    if tables:
+        print("\n## 表（log_table で送った値。同じ指標は最新）")
+    for label, values in tables.items():
+        print(f"{label}")
+        for name, v in values.items():
+            print(f"  {name}: {_fmt(v)}")
 
     images = {k: v for k, v in store.images(run["run_id"]).items() if shown(k)}
     if images:
