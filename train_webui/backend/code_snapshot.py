@@ -44,6 +44,11 @@ def snapshot_code(repo_root: Path, run_id: str) -> str:
     return commit
 
 
+def set_ref(repo_root: Path, run_id: str, commit: str) -> None:
+    """既にある commit（過去の run のコード）に、この run の ref を付ける。元の run を消してもコードが残る。"""
+    _git(repo_root, ["update-ref", REF_PREFIX + run_id, commit])
+
+
 def export_commit(repo_root: Path, commit: str, dest: Path) -> None:
     """commit の中身を dest（空のディレクトリ）に取り出す。作業ツリーには触らない。"""
     dest.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
 import subprocess
 
-from train_webui.backend.code_snapshot import REF_PREFIX, delete_ref, export_commit, snapshot_code
+from train_webui.backend.code_snapshot import REF_PREFIX, delete_ref, export_commit, set_ref, snapshot_code
 
 
 def _git(root, *args):
@@ -54,3 +54,11 @@ def test_delete_ref(tmp_path):
     delete_ref(tmp_path, "run1")
     delete_ref(tmp_path, "run1")  # 2回目も落ちない
     assert _git(tmp_path, "for-each-ref", "refs/webui/") == ""
+
+
+def test_set_ref_keeps_code_after_source_run_deleted(tmp_path):
+    _init_repo(tmp_path)
+    commit = snapshot_code(tmp_path, "run1")
+    set_ref(tmp_path, "run2", commit)
+    delete_ref(tmp_path, "run1")
+    assert _git(tmp_path, "rev-parse", REF_PREFIX + "run2") == commit

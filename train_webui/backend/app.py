@@ -331,6 +331,7 @@ def create_app(
         snapshot_kwargs = {
             "snapshot_code": lambda run_id: code_snapshot.snapshot_code(settings.repo_root, run_id),
             "export_code": lambda commit, dest: code_snapshot.export_commit(settings.repo_root, commit, dest),
+            "tag_code": lambda run_id, commit: code_snapshot.set_ref(settings.repo_root, run_id, commit),
         }
     job_manager = JobManager(settings, db, remote, launch_in_background=start_background, **snapshot_kwargs)
     if start_background:

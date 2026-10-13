@@ -25,11 +25,13 @@ class JobManager:
     def __init__(self, settings: Settings, db: Database, remote: RemoteControllerProtocol,
                  launch_in_background: bool = True,
                  snapshot_code: Callable[[str], str] | None = None,
-                 export_code: Callable[[str, Path], None] | None = None) -> None:
+                 export_code: Callable[[str, Path], None] | None = None,
+                 tag_code: Callable[[str, str], None] | None = None) -> None:
         # snapshot_code(run_id) -> commit: 起動時のコードを ref にして残す。export_code(commit, dest): 過去のコードを取り出す
         # どちらも None のとき（テスト等）はコードの記録・復元をしない
         self._snapshot_code = snapshot_code
         self._export_code = export_code
+        self._tag_code = tag_code  # tag_code(run_id, commit): 再実行する run にも、同じ commit への ref を付ける
         self._settings = settings
         self._db = db
         self._remote = remote
@@ -111,6 +113,8 @@ class JobManager:
             if run.get("code_commit"):
                 # 過去の run のコードで再実行する下書き。ローカルの作業ツリーではなく、記録した commit を送る
                 self._sync_recorded_code(run["code_commit"])
+                if self._tag_code is not None:
+                    self._tag_code(run_id, run["code_commit"])
             else:
                 sync_info = self._remote.sync_code()
                 self._db.create_sync(

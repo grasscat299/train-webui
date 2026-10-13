@@ -33,13 +33,16 @@ def test_rerun_draft_pins_code_and_launch_uses_recorded_code(app_factory):
     client = TestClient(app)
     src = _finished_run(app, client, settings, code_commit="deadbeef")
     exported = []
+    tagged = []
     app.state.job_manager._export_code = lambda commit, dest: exported.append((commit, dest))
+    app.state.job_manager._tag_code = lambda run_id, commit: tagged.append((run_id, commit))
     draft = client.post("/api/runs/draft", json={
         "project": "proj_a", "new_group": False, "rerun_of": src["run_id"]}).json()
     assert draft["code_commit"] == "deadbeef" and draft["parent_run_id"] is None
     assert draft["git_diff"] == "d"
     assert client.post(f"/api/runs/{draft['run_id']}/start").status_code in (200, 202, 204)
     assert exported and exported[0][0] == "deadbeef"
+    assert tagged == [(draft["run_id"], "deadbeef")]  # 再実行した run にも自分の ref が付く
     assert remote.sync_sources[-1] is not None  # 作業ツリーではなく取り出したディレクトリを送った
 
 
