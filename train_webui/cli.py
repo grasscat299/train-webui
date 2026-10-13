@@ -27,6 +27,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from .backend.categories import classify, load_categories
 from .backend.decimate import decimate_minmax, decimate_stride
 from .backend.settings import DEFAULT_PATH, REPO_ROOT, load_settings
 
@@ -229,7 +230,13 @@ def _config_diff(a: str, b: str, name_a: str, name_b: str) -> str:
 
 def cmd_ls(store: Store, project: str | None) -> None:
     projects = [store.resolve_project(project)] if project else store.projects()
+    cats = load_categories()
+    shown: set[tuple[str, str]] = set()
     for p in projects:
+        ws, cat = classify(p, cats)
+        if (ws, cat) not in shown:  # プロジェクト > カテゴリー の見出しは最初の1回だけ
+            shown.add((ws, cat))
+            print(f"[{ws} > {cat}]")
         print(p)
         names = store.group_names(p)
         groups = sorted({r["run_group"] for r in store.q("SELECT run_group FROM runs WHERE project = ?", (p,))},

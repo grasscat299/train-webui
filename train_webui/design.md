@@ -122,6 +122,15 @@ WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマ�
 - **project の識別子はリポジトリ直下からのディレクトリパス**（例: `src/world_model_v1`）。
   `[wandb].project` の値は表示にもキーにも使わない（ツリーの並びと一致させるため）。
 
+## 2.5 プロジェクト > カテゴリー > モデル（表示上の分類）
+
+- 画面のツリーは `プロジェクト > カテゴリー > モデル（§2 の project）> group > run` の順。上2段は検出ではなく
+  `train_webui/categories.toml`（git管理）で決める。モデルのパス（repo直下からの相対）を `match` の glob に当て、
+  上から順に最初に合致したカテゴリーに入れる。どれにも合致しなければ「未分類」。
+- DB・CLIの引数は従来のまま（モデル名=project）。`/api/tree` の各要素に `workspace`・`category` が足されるだけ。
+  `cli ls` は `[プロジェクト > カテゴリー]` の見出しを出す。
+- 初期は `td_plan > モデル`（`src/*`・`scratch/*`）の1つだけ。増やすときは `[[project.category]]` を足す。
+
 ## 3. config は run に1つ紐づく（config.tomlは「今開いている下書き」でしかない）
 
 - **1 run = 1 config スナップショット**が原則。起動した run の config は読み取り専用。

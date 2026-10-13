@@ -1,0 +1,10 @@
+# モデル（main.py を持つ project）を「プロジェクト > カテゴリー」に分類する（design.md §2.5）。
+# match は repo 直下からの相対パス（posix）への glob。上から順に最初に合致したカテゴリーに入る。
+# どれにも合致しないモデルは「未分類」に入る。カテゴリーを増やすときは [[project.category]] を足す。
+
+[[project]]
+name = "td_plan"
+
+[[project.category]]
+name  = "モデル"
+match = ["src/*", "scratch/*"]

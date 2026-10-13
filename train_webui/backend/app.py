@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import discovery
+from . import categories, discovery
 from .db import Database, now_iso
 from .decimate import decimate_minmax, decimate_stride
 from .ids import new_group_id, new_run_id
@@ -707,6 +707,7 @@ def create_app(
 
 
 def _build_tree(db: Database, projects: list[str]) -> list[dict]:
+    cats = categories.load_categories()  # 小さいファイルなので毎回読む（編集がすぐ反映される）
     tree = []
     for project in projects:
         runs = db.list_runs_by_project(project)  # created_at 降順
@@ -718,5 +719,6 @@ def _build_tree(db: Database, projects: list[str]) -> list[dict]:
             {"group": g, "group_name": names.get(g, g), "runs": [_run_summary(r, names.get(g)) for r in groups[g]]}
             for g in sorted(groups, key=lambda g: names.get(g, g))
         ]
-        tree.append({"project": project, "groups": group_list})
+        workspace, category = categories.classify(project, cats)
+        tree.append({"project": project, "workspace": workspace, "category": category, "groups": group_list})
     return tree

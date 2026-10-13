@@ -27,10 +27,50 @@ export function Tree(props: TreeProps) {
   return (
     <aside className="tree">
       {props.tree.length === 0 && <div className="tree-empty">projectが見つかりません</div>}
-      {props.tree.map((p) => (
-        <ProjectRow key={p.project} node={p} {...props} />
+      {groupByWorkspace(props.tree).map((ws) => (
+        <HeaderRow key={ws.name} label={ws.name} storeKey={`treeOpen.ws.${ws.name}`} className="tree-workspace-row">
+          {ws.categories.map((c) => (
+            <HeaderRow key={c.name} label={c.name} storeKey={`treeOpen.cat.${ws.name}\u0000${c.name}`} className="tree-category-row">
+              {c.models.map((p) => (
+                <ProjectRow key={p.project} node={p} {...props} />
+              ))}
+            </HeaderRow>
+          ))}
+        </HeaderRow>
       ))}
     </aside>
+  );
+}
+
+// プロジェクト > カテゴリー > モデル（ProjectNode）の順に、tree の出現順を保ってまとめる
+function groupByWorkspace(tree: ProjectNode[]) {
+  const result: { name: string; categories: { name: string; models: ProjectNode[] }[] }[] = [];
+  for (const p of tree) {
+    const wsName = p.workspace ?? 'td_plan';
+    const catName = p.category ?? '未分類';
+    let ws = result.find((w) => w.name === wsName);
+    if (!ws) result.push((ws = { name: wsName, categories: [] }));
+    let cat = ws.categories.find((c) => c.name === catName);
+    if (!cat) ws.categories.push((cat = { name: catName, models: [] }));
+    cat.models.push(p);
+  }
+  return result;
+}
+
+function HeaderRow({ label, storeKey, className, children }: {
+  label: string; storeKey: string; className: string; children: React.ReactNode;
+}) {
+  const [open, setOpen] = usePersistentState(storeKey, true);
+  return (
+    <div>
+      <div className={`tree-row ${className}`}>
+        <button className="tree-toggle" onClick={() => setOpen((v) => !v)} aria-label={open ? '閉じる' : '開く'}>
+          <ChevronIcon open={open} />
+        </button>
+        <span className="tree-project-name">{label}</span>
+      </div>
+      {open && <div className="tree-children">{children}</div>}
+    </div>
   );
 }
 
