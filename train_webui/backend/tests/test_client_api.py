@@ -162,3 +162,32 @@ def test_results_bad_base64_400(app_factory):
         "items": [{"kind": "image", "label": "x", "image_b64": "not-base64!!", "sent_at": "2026-01-01T00:00:00+09:00"}],
     })
     assert resp.status_code == 400
+
+
+def test_table_items_saved_and_listed(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    run_id = _create_cli_run(client)["run_id"]
+    items = [
+        {"kind": "table", "label": "eval/summary", "name": "acc", "value": 0.9, "sent_at": "2026-10-13T10:00:00+09:00"},
+        {"kind": "table", "label": "eval/summary", "name": "loss", "value": 0.1, "sent_at": "2026-10-13T10:00:00+09:00"},
+    ]
+    assert client.post("/api/results", json={"run_id": run_id, "source": "train", "items": items}).status_code == 204
+    rows = client.get(f"/api/runs/{run_id}/results", params={"kind": "table"}).json()
+    assert [(r["name"], r["value"]) for r in rows] == [("acc", 0.9), ("loss", 0.1)]
+    labels = client.get("/api/labels", params={"run_ids": run_id}).json()
+    assert labels == [{"label": "eval/summary", "kind": "table"}]
+
+
+def test_table_requires_name_and_conflicts_with_metric_label(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    run_id = _create_cli_run(client)["run_id"]
+
+    def post(item):
+        return client.post("/api/results", json={"run_id": run_id, "source": "train", "items": [item]})
+
+    base = {"label": "x", "value": 1.0, "sent_at": "2026-10-13T10:00:00+09:00"}
+    assert post({**base, "kind": "table"}).status_code == 400
+    assert post({**base, "kind": "metric", "step": 1}).status_code == 204
+    assert post({**base, "kind": "table", "name": "a"}).status_code == 400

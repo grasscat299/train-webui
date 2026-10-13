@@ -5,6 +5,7 @@ import { waitUntilVisible } from '../hooks/visibility';
 import type { ImageResult, LabelInfo, MetricResult, Plot, ProjectNode, Result } from '../api';
 import { MetricChart } from './MetricChart';
 import { PlotChart, mergePlots } from './PlotChart';
+import { ResultTable } from './ResultTable';
 import { PanelSections } from './PanelSections';
 import type { PanelItem } from './PanelSections';
 import { copyText } from '../copyText';
@@ -156,6 +157,17 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
         // 見出しの title は PlotChart と同じく updated_at が最新の定義のもの
         const latest = entries.map((e) => e.plot).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
         return { label: l.label, subtitle: latest?.title, content: <PlotChart entries={entries} /> };
+      }
+      if (l.kind === 'table') {
+        return {
+          label: l.label,
+          content: (
+            <ResultTable
+              label={l.label}
+              columns={runIds.map((id) => ({ runId: id, runLabel: runLabel(id), results: resultsByRun[id] ?? [] }))}
+            />
+          ),
+        };
       }
       if (l.kind === 'metric') {
         return {

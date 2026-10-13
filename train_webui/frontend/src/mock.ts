@@ -114,6 +114,12 @@ function addJob(runId: string, job: Job) {
   jobsByRun.set(runId, list);
 }
 
+function pushTable(runId: string, label: string, name: string, value: number, source: string, sentAt = isoNow()) {
+  const list = resultsByRun.get(runId) ?? [];
+  list.push({ id: nextResultId++, run_id: runId, kind: 'table', label, name, step: null, value, source, sent_at: sentAt });
+  resultsByRun.set(runId, list);
+}
+
 function pushMetric(runId: string, label: string, step: number | null, value: number, source: string, sentAt = isoNow()) {
   const list = resultsByRun.get(runId) ?? [];
   const r: MetricResult = { id: nextResultId++, run_id: runId, kind: 'metric', label, step, value, source, sent_at: sentAt };
@@ -307,6 +313,8 @@ function seed() {
     error: null,
   });
   logsByJob.set(inferJobId, `[${hoursAgo(10).toISOString()}] infer開始 (mock)\n[${hoursAgo(10).toISOString()}] infer完了\n`);
+  pushTable(t1.run_id, 'infer/summary', '全滅率', 0.62, 'infer', hoursAgo(10).toISOString());
+  pushTable(t1.run_id, 'infer/summary', '撃破時刻の一致', 0.99, 'infer', hoursAgo(10).toISOString());
   pushImage(t1.run_id, 'infer/xy', null, dummyImage('infer/xy', null, '#16a34a'), 'infer', hoursAgo(10).toISOString());
 
   const t2 = makeRun({

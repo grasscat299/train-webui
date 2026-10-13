@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS results (
     label TEXT NOT NULL,
     step INTEGER,
     value REAL,
+    name TEXT,
     image_path TEXT,
     source TEXT NOT NULL,
     sent_at TEXT NOT NULL
@@ -165,6 +166,9 @@ class Database:
                 name = self._next_display_name(conn, r["project"], r["run_group"])
                 conn.execute("UPDATE runs SET display_name = ? WHERE run_id = ?", (name, r["run_id"]))
             # group の説明（モデルの構成を書いた Markdown。Claude が読む）の追加前のDBは空文字で移行
+            rcols = {r["name"] for r in conn.execute("PRAGMA table_info(results)").fetchall()}
+            if "name" not in rcols:
+                conn.execute("ALTER TABLE results ADD COLUMN name TEXT")
             gcols = {r["name"] for r in conn.execute("PRAGMA table_info(groups)").fetchall()}
             if "description" not in gcols:
                 conn.execute("ALTER TABLE groups ADD COLUMN description TEXT NOT NULL DEFAULT ''")

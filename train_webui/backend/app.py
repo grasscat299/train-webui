@@ -118,8 +118,9 @@ class FinishRequest(BaseModel):
 
 
 class ResultItem(BaseModel):
-    kind: Literal["metric", "image", "plot_def", "plot_points"]
+    kind: Literal["metric", "image", "table", "plot_def", "plot_points"]
     label: str
+    name: str | None = None  # table: 表の行名（指標名）
     step: int | None = None
     value: float | None = None
     image_b64: str | None = None
@@ -188,6 +189,8 @@ def _result_public(row: dict) -> dict:
         base["image_url"] = f"/media/{row['image_path']}"
     else:
         base["value"] = row["value"]
+        if row["kind"] == "table":
+            base["name"] = row["name"]
     return base
 
 
@@ -227,14 +230,18 @@ def _plot_public(db: Database, row: dict, after_id: int | None, max_points: int,
     }
 
 
-def _check_label_kind(db: Database, run_id: str, label: str, is_plot: bool) -> None:
+def _check_label_kind(db: Database, run_id: str, label: str, is_plot: bool, kind: str = "") -> None:
     """同じ run で plot と metric/image に同じラベルを使わせない（CONTRACT.md §2.3）。"""
     if is_plot:
         other = db.result_label_kind(run_id, label)
         if other is not None:
             raise HTTPException(400, f"ラベル {label} は既に {other} として使われています")
-    elif db.get_plot(run_id, label) is not None:
-        raise HTTPException(400, f"ラベル {label} は既に plot として使われています")
+    else:
+        if db.get_plot(run_id, label) is not None:
+            raise HTTPException(400, f"ラベル {label} は既に plot として使われています")
+        other = db.result_label_kind(run_id, label)
+        if other is not None and other != kind:
+            raise HTTPException(400, f"ラベル {label} は既に {other} として使われています")
 
 
 def _save_plot_item(db: Database, run_id: str, source: str, item: ResultItem) -> None:
@@ -655,9 +662,17 @@ def create_app(
             raise HTTPException(404, "run が見つかりません")
         for item in body.items:
             is_plot = item.kind in ("plot_def", "plot_points")
-            _check_label_kind(db, body.run_id, item.label, is_plot)
+            _check_label_kind(db, body.run_id, item.label, is_plot, item.kind)
             if is_plot:
                 _save_plot_item(db, body.run_id, body.source, item)
+                continue
+            if item.kind == "table":
+                if not item.name or item.value is None:
+                    raise HTTPException(400, "table には name と value が必要です")
+                db.create_result(
+                    run_id=body.run_id, kind="table", label=item.label, name=item.name, step=item.step,
+                    value=item.value, image_path=None, source=body.source, sent_at=item.sent_at,
+                )
                 continue
             if item.kind == "metric":
                 db.create_result(
