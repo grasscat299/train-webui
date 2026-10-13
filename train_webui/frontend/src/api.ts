@@ -204,6 +204,8 @@ export interface Api {
   stopRun(runId: string): Promise<Run>;
   deleteRun(runId: string): Promise<void>;
   groupInfer(project: string, group: string): Promise<Job>;
+  // その run の重みで推論する（重みが登録された、学習の終わった run だけ）
+  runInfer(project: string, runId: string): Promise<Job>;
   getJobLog(jobId: string, offset: number): Promise<JobLogResp>;
   getResults(runId: string, kind?: 'metric' | 'image' | 'table', label?: string): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
@@ -283,6 +285,11 @@ const realApi: Api = {
     request<Job>('/api/groups/infer', {
       method: 'POST',
       body: JSON.stringify({ project, group }),
+    }),
+  runInfer: (project, runId) =>
+    request<Job>('/api/groups/infer', {
+      method: 'POST',
+      body: JSON.stringify({ project, run_id: runId }),
     }),
   getJobLog: (jobId, offset) =>
     request<JobLogResp>(`/api/jobs/${encodeURIComponent(jobId)}/log?offset=${offset}`),

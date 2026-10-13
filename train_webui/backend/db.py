@@ -155,13 +155,17 @@ class Database:
 
     def _connect(self) -> sqlite3.Connection:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self._path), timeout=10, check_same_thread=False)
-        conn.execute("PRAGMA busy_timeout = 5000")
+        conn = sqlite3.connect(str(self._path), timeout=30, check_same_thread=False)
+        conn.execute("PRAGMA busy_timeout = 30000")
         conn.row_factory = sqlite3.Row
         return conn
 
     def init_schema(self) -> None:
         with self._connect() as conn:
+            # WAL: 読み取り（画面の定期更新・グラフの取得）が書き込みを止めない。既定の方式だと、読み取りが続く間
+            # ジョブ起動後の pid の記録などが `database is locked` で失敗し、ジョブが「起動処理中」のまま固まった。
+            # 設定はDBファイルに残るので、一度切り替えれば以降は自動
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
             # display_name 追加前に作られたDBの移行: 列を足し、既存runに group 内の作成順で v1, v2, ... を振る
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}

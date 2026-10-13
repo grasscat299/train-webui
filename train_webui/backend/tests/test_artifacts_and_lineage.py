@@ -93,3 +93,45 @@ def test_launch_passes_artifact_dir_and_init_from(tmp_path):
     assert "mkdir -p" in launch_cmd and "/remote/run_root/r2/artifacts" in launch_cmd
     # config のスナップショットが run の保管場所に書かれる
     assert any("/remote/run_root/r2/config.toml" in c for c in cmds)
+
+
+def test_infer_by_run_uses_that_run_and_requires_registered_checkpoint(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    older = _finished_run(app, client, settings)          # v1: 重みあり
+    newer = client.post("/api/runs/draft", json={"project": "proj_a", "group": older["group"], "new_group": False}).json()
+    app.state.db.update_run(newer["run_id"], status="finished")  # v2（group の最新）: 重みなし
+
+    # 重みが登録されていない run は断る
+    resp = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": older["run_id"]})
+    assert resp.status_code == 400
+
+    body = {"name": "model.pt", "kind": "checkpoint", "path": "/remote/x/model.pt", "size": 1}
+    client.post(f"/api/runs/{older['run_id']}/artifacts", json=body)
+    resp = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": older["run_id"]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["run_id"] == older["run_id"]       # group の最新（newer）ではなく、指定した run
+    assert remote.launches[-1].run_id == older["run_id"] and remote.launches[-1].kind == "infer"
+
+
+def test_infer_rejects_bad_targets(app_factory):
+    app, settings, _ = app_factory()
+    client = TestClient(app)
+    write_project(settings.repo_root, "proj_a")
+    draft = client.post("/api/runs/draft", json={"project": "proj_a", "group": None, "new_group": True}).json()
+    assert client.post("/api/groups/infer", json={"project": "proj_a", "run_id": draft["run_id"]}).status_code == 400  # draft
+    assert client.post("/api/groups/infer", json={"project": "proj_a", "run_id": "nope"}).status_code == 404
+    assert client.post("/api/groups/infer", json={"project": "proj_a"}).status_code == 400  # group も run_id も無い
+
+
+def test_db_uses_wal_so_readers_do_not_block_writers(app_factory):
+    app, _settings, _ = app_factory()
+    db = app.state.db
+    with db._connect() as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    # 読み取りの途中でも書き込めること（既定の方式ではここでロックされうる）
+    reader = db._connect()
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM runs").fetchall()
+    db.upsert_artifact("r", "model.pt", "checkpoint", "/x", 1, "2026-01-01T00:00:00+09:00")
+    reader.close()

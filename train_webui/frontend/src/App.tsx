@@ -246,6 +246,15 @@ export default function App() {
     }
   };
 
+  const handleInferRun = async (project: string, runId: string) => {
+    try {
+      await api.runInfer(project, runId);
+      await rescan();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <ViewContext.Provider value={{ view, update: updateView }}>
       <div className="app" style={viewStyle(view)}>
@@ -287,6 +296,7 @@ export default function App() {
             onNewGroup={handleNewGroup}
             onRenameGroup={handleRenameGroup}
             onInfer={handleInfer}
+            onInferRun={handleInferRun}
             isRunChecked={isRunChecked}
             isGroupChecked={isGroupChecked}
             isProjectChecked={isProjectChecked}

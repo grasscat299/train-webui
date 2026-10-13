@@ -94,6 +94,7 @@ train_webui/
 | `PUT /api/groups` | body `{"project": str, "group": str, "group_name": str}`。group の表示名だけを変える（group_id・config は変えない）。空なら400、group が無ければ404。返り値 `{"project", "group", "group_name"}` |
 | `GET /api/runs/{run_id}` | Run |
 | `PUT /api/runs/{run_id}/config` | body `{"config_toml": str}`。draftのみ（それ以外409）。TOMLとして不正なら400。`[wandb].group` が変わっていればgroupも更新。返り値 Run |
+| `POST /api/groups/infer` | body `{"project","group"?,"run_id"?,"overrides"?}`。`run_id` があればその run の重みで、無ければ `group` の最新の学習済み run の重みで推論する（どちらか必須）。重みが登録されていない run・running・failed・draft の run を指定すると 400 |
 | `POST /api/runs/draft` の追加キー | `parent_run_id`（その run の重みから続きを学習する下書き）／`rerun_of`（その run のコードで再実行する下書き）。どちらも元と同じ group・config で作る |
 | `POST /api/runs/{run_id}/artifacts` | body `{"name","kind","path","size"}`。client が重みなどの場所を登録する（204）。`GET` で一覧。Run に `artifacts`・`code_commit`・`parent_run_id` が付く |
 | `GET /api/runs/{run_id}/plots/binned?label=&bin=` | line のグラフを x の幅ごとに平均して返す（全点から作る）。`bin` は `"epoch"`（config の `steps_per_epoch`、x は epoch 番号）か幅の数値。返り値 `{"label","bin","width","epoch","series":[{"name","points":[[x,平均]],"total_points"}]}`。config に steps_per_epoch が無い・scatter・不正な bin は 400 |

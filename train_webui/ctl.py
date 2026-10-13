@@ -8,7 +8,7 @@ server が起動している必要がある。リポジトリ直下から実行�
     venv/bin/python -m train_webui.ctl describe <project> <group> (--file パス | --text 文章 | 標準入力)
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
     venv/bin/python -m train_webui.ctl start <run_id>
-    venv/bin/python -m train_webui.ctl infer <project> <group> [--set section.key=<TOMLリテラル> ...]
+    venv/bin/python -m train_webui.ctl infer <project> [<group> | --run RUN_ID] [--set section.key=<TOMLリテラル> ...]
     venv/bin/python -m train_webui.ctl stop <run_id>
 
 - `describe` は group（=モデル構成）の説明（Markdown）を上書きする。group は group_id でも表示名でもよい。
@@ -125,8 +125,10 @@ def cmd_stop(api: Api, args: argparse.Namespace) -> None:
 
 
 def cmd_infer(api: Api, args: argparse.Namespace) -> None:
+    if not args.group and not args.run:
+        raise CtlError("group か --run のどちらかを指定してください")
     job = api.call("POST", "/api/groups/infer",
-                   {"project": args.project, "group": args.group, "overrides": args.overrides})
+                   {"project": args.project, "group": args.group, "run_id": args.run, "overrides": args.overrides})
     print(json.dumps(job, ensure_ascii=False, indent=2))
 
 
@@ -169,9 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("run_id")
     s.set_defaults(func=cmd_stop)
 
-    s = sub.add_parser("infer", help="group の最新の学習済み run で推論する")
+    s = sub.add_parser("infer", help="group の最新の学習済み run、または --run で指定した run の重みで推論する")
     s.add_argument("project")
-    s.add_argument("group")
+    s.add_argument("group", nargs="?", help="group_id。省略して --run だけでもよい")
+    s.add_argument("--run", metavar="RUN_ID", help="この run の重みで推論する（重みが登録された、学習の終わった run だけ）")
     s.add_argument("--set", dest="overrides", action="append", default=[], metavar="section.key=値",
                    help="この推論だけ config を上書き（run の config は変えない。無いキーは section に足す）")
     s.set_defaults(func=cmd_infer)

@@ -675,6 +675,12 @@ async function deleteRun(runId: string): Promise<void> {
   plotsByRun.delete(runId);
 }
 
+async function runInfer(project: string, runId: string): Promise<Job> {
+  const run = runs.get(runId);
+  if (!run || run.project !== project) throw new Error('対象のrunが見つかりません');
+  return groupInfer(project, run.group);
+}
+
 async function groupInfer(project: string, group: string): Promise<Job> {
   if (computeState().busy) {
     throw new Error('他のジョブが実行中です（GPU使用中のため開始できません）');
@@ -820,6 +826,7 @@ export const mockApi: Api = {
   stopRun,
   deleteRun,
   groupInfer,
+  runInfer,
   getJobLog,
   getResults,
   getLabels,

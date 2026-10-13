@@ -108,7 +108,9 @@ class ComparisonUpdate(BaseModel):
 
 class InferRequest(BaseModel):
     project: str
-    group: str
+    # run_id を指定するとその run の重みで、無ければ group の最新の学習済み run の重みで推論する（どちらか必須）
+    group: str | None = None
+    run_id: str | None = None
     # その推論ジョブに渡す config だけを書き換える（run に保存された config は変えない）。
     # `section.key=TOMLリテラル` の並び。無いキーは section の中に足す。
     overrides: list[str] = []
@@ -600,9 +602,20 @@ def create_app(
 
     @app.post("/api/groups/infer")
     async def start_infer(body: InferRequest) -> dict:
-        target = db.find_latest_train_run(body.project, body.group)
-        if target is None:
-            raise HTTPException(404, "対象のrunが見つかりません")
+        if body.run_id:
+            target = db.get_run(body.run_id)
+            if target is None or target["project"] != body.project:
+                raise HTTPException(404, "対象のrunが見つかりません")
+            if target["status"] in ("draft", "running", "failed"):
+                raise HTTPException(400, f"{target['status']} の run では推論できません（学習が終わった run を選んでください）")
+            if not any(a["kind"] == "checkpoint" for a in db.list_artifacts(target["run_id"])):
+                raise HTTPException(400, "この run には重みが登録されていません（古い run は各 group の最新の run にしか重みがありません）")
+        elif body.group:
+            target = db.find_latest_train_run(body.project, body.group)
+            if target is None:
+                raise HTTPException(404, "対象のrunが見つかりません")
+        else:
+            raise HTTPException(400, "group か run_id のどちらかが必要です")
         config_toml = target["config_toml"]
         for assignment in body.overrides:
             key, eq, literal = assignment.partition("=")
