@@ -707,7 +707,7 @@ def create_app(
 
 
 def _build_tree(db: Database, projects: list[str]) -> list[dict]:
-    cats = categories.load_categories()  # 小さいファイルなので毎回読む（編集がすぐ反映される）
+    cats = categories.load_workspaces()  # 小さいファイルなので毎回読む（編集がすぐ反映される）
     tree = []
     for project in projects:
         runs = db.list_runs_by_project(project)  # created_at 降順
@@ -719,6 +719,5 @@ def _build_tree(db: Database, projects: list[str]) -> list[dict]:
             {"group": g, "group_name": names.get(g, g), "runs": [_run_summary(r, names.get(g)) for r in groups[g]]}
             for g in sorted(groups, key=lambda g: names.get(g, g))
         ]
-        workspace, category = categories.classify(project, cats)
-        tree.append({"project": project, "workspace": workspace, "category": category, "groups": group_list})
+        tree.append({"project": project, "workspace": categories.classify(project, cats), "groups": group_list})
     return tree

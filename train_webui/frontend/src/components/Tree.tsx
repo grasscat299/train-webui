@@ -29,12 +29,8 @@ export function Tree(props: TreeProps) {
       {props.tree.length === 0 && <div className="tree-empty">projectが見つかりません</div>}
       {groupByWorkspace(props.tree).map((ws) => (
         <HeaderRow key={ws.name} label={ws.name} storeKey={`treeOpen.ws.${ws.name}`} className="tree-workspace-row">
-          {ws.categories.map((c) => (
-            <HeaderRow key={c.name} label={c.name} storeKey={`treeOpen.cat.${ws.name}\u0000${c.name}`} className="tree-category-row">
-              {c.models.map((p) => (
-                <ProjectRow key={p.project} node={p} {...props} />
-              ))}
-            </HeaderRow>
+          {ws.models.map((p) => (
+            <ProjectRow key={p.project} node={p} {...props} />
           ))}
         </HeaderRow>
       ))}
@@ -42,17 +38,14 @@ export function Tree(props: TreeProps) {
   );
 }
 
-// プロジェクト > カテゴリー > モデル（ProjectNode）の順に、tree の出現順を保ってまとめる
+// プロジェクト > モデル（ProjectNode。モデルのパスがそのままカテゴリーとして出る）の順に、tree の出現順を保ってまとめる
 function groupByWorkspace(tree: ProjectNode[]) {
-  const result: { name: string; categories: { name: string; models: ProjectNode[] }[] }[] = [];
+  const result: { name: string; models: ProjectNode[] }[] = [];
   for (const p of tree) {
-    const wsName = p.workspace ?? 'td_plan';
-    const catName = p.category ?? '未分類';
+    const wsName = p.workspace ?? '未分類';
     let ws = result.find((w) => w.name === wsName);
-    if (!ws) result.push((ws = { name: wsName, categories: [] }));
-    let cat = ws.categories.find((c) => c.name === catName);
-    if (!cat) ws.categories.push((cat = { name: catName, models: [] }));
-    cat.models.push(p);
+    if (!ws) result.push((ws = { name: wsName, models: [] }));
+    ws.models.push(p);
   }
   return result;
 }
@@ -138,7 +131,7 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
   toggleRun: (runId: string, val: boolean) => void;
   toggleGroup: (project: string, group: string, runs: RunSummary[], val: boolean) => void;
 }) {
-  const [open, setOpen] = usePersistentState(`treeOpen.${project}\u0000${node.group}`, true);
+  const [open, setOpen] = usePersistentState(`treeOpenRuns.${project}\u0000${node.group}`, false);
   // 直近にコピーした run（アイコンをチェックにして知らせる）
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyRunId = async (runId: string) => {
@@ -149,7 +142,7 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
   return (
     <div className="tree-group">
       <div className="tree-row tree-group-row">
-        <button className="tree-toggle" onClick={() => setOpen((v) => !v)} aria-label={open ? '閉じる' : '開く'}>
+        <button className="tree-toggle" onClick={() => setOpen((v) => !v)} aria-label={open ? 'runを隠す' : 'runを表示'}>
           <ChevronIcon open={open} />
         </button>
         {mode === 'result' && (

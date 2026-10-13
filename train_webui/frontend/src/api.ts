@@ -117,8 +117,7 @@ export interface GroupNode {
 
 export interface ProjectNode {
   project: string;
-  workspace: string; // プロジェクト（categories.toml）
-  category: string; // カテゴリー（categories.toml。無ければ「未分類」）
+  workspace: string; // プロジェクト（categories.toml。無ければ「未分類」）
   groups: GroupNode[];
 }
 

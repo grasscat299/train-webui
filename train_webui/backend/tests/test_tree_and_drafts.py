@@ -114,17 +114,17 @@ def test_draft_for_new_project_rescans(app_factory):
     assert resp.status_code == 200
 
 
-def test_tree_has_workspace_and_category(app_factory):
+def test_tree_has_workspace(app_factory):
     app, settings, remote = app_factory()
     write_project(settings.repo_root, "proj_a")
     tree = TestClient(app).get("/api/tree").json()
-    assert tree[0]["workspace"] and tree[0]["category"]
+    assert tree[0]["workspace"]
 
 
 def test_classify_by_glob():
-    from train_webui.backend.categories import Category, classify
+    from train_webui.backend.categories import Workspace, classify
 
-    cats = [Category("ws", "モデル", ("src/*",))]
-    assert classify("src/world_model_v2", cats) == ("ws", "モデル")
-    assert classify("other/x", cats) == ("ws", "未分類")
-    assert classify("x", []) == ("td_plan", "未分類")
+    ws = [Workspace("ws", ("src/*",))]
+    assert classify("src/world_model_v2", ws) == "ws"
+    assert classify("other/x", ws) == "未分類"
+    assert classify("x", []) == "未分類"

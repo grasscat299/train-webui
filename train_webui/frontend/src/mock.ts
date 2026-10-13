@@ -244,7 +244,7 @@ function buildTree(): ProjectNode[] {
           group_name: groupNameOf(project, g),
           runs: groupMap.get(g)!.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)),
         }));
-      return { project, workspace: 'td_plan', category: 'モデル', groups };
+      return { project, workspace: 'td_plan', groups };
     });
 }
 
