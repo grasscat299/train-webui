@@ -5,14 +5,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import time
+
+from pathlib import Path
 
 from ..settings import Settings
 from .errors import RemoteError
 from .types import CommandRunner, GpuUsage, JobState, LaunchResult, LaunchSpec, SyncInfo
 
+_SAFE_ID = re.compile(r"[A-Za-z0-9_.-]+")
 _SSH_TIMEOUT_SEC = 30.0
 _RSYNC_TIMEOUT_SEC = 300.0
 _GIT_TIMEOUT_SEC = 15.0
@@ -40,7 +44,10 @@ class RemoteController:
     # RemoteControllerProtocol 実装
     # ------------------------------------------------------------------
 
-    def sync_code(self) -> SyncInfo:
+    def sync_code(self, source_dir: Path | None = None) -> SyncInfo:
+        if source_dir is not None:  # 過去の run のコードを取り出したディレクトリ。git情報は呼び出し側が持っている
+            self._rsync(source_dir)
+            return SyncInfo(git_commit="", git_diff="", git_untracked="{}")
         git_commit = self._git(["rev-parse", "HEAD"]).strip()
         git_diff = self._git(["diff", "HEAD"])
         untracked_paths = [p for p in self._git(["ls-files", "--others", "--exclude-standard"]).splitlines() if p]
@@ -48,12 +55,24 @@ class RemoteController:
         self._rsync()
         return SyncInfo(git_commit=git_commit, git_diff=git_diff, git_untracked=git_untracked)
 
+    def remove_run_files(self, run_id: str) -> None:
+        if not _SAFE_ID.fullmatch(run_id):
+            raise RemoteError(f"run_id が不正です: {run_id!r}")
+        proc = self._ssh_run(f"rm -rf {shlex.quote(f'{self._settings.remote.run_root}/{run_id}')}",
+                             timeout=_SSH_TIMEOUT_SEC)
+        self._check(proc, "runのファイルの削除")
+
     def launch(self, spec: LaunchSpec) -> LaunchResult:
         r = self._settings.remote
         remote_config_path = f"{r.repo_dir}/{spec.project_dir}/config.toml"
         write_cmd = f"cat > {shlex.quote(remote_config_path)}"
         proc = self._ssh_run(write_cmd, input=spec.config_toml.encode("utf-8"), timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "config.tomlの書き込み")
+        # run の保管場所に config のスナップショットも残す（<run_root>/<run_id>/config.toml）
+        run_dir = f"{r.run_root}/{spec.run_id}"
+        snap_cmd = f"mkdir -p {shlex.quote(run_dir)} && cat > {shlex.quote(run_dir + '/config.toml')}"
+        proc = self._ssh_run(snap_cmd, input=spec.config_toml.encode("utf-8"), timeout=_SSH_TIMEOUT_SEC)
+        self._check(proc, "configスナップショットの書き込み")
 
         job_dir = f"{r.run_root}/{spec.run_id}/{spec.job_id}"
         remote_cmd = self._build_launch_command(spec, job_dir)
@@ -148,7 +167,12 @@ class RemoteController:
             f"TRAIN_WEBUI_RUN_ID={shlex.quote(spec.run_id)}",
             f"TRAIN_WEBUI_PROJECT={shlex.quote(spec.project_dir)}",
             f"TRAIN_WEBUI_SOURCE={shlex.quote(spec.kind)}",
+            # 重みなどの保存先（run ごと）と、引き継ぎ元の run の重みを探すための起点（design.md §3.5）
+            f"TRAIN_WEBUI_ARTIFACT_DIR={shlex.quote(f'{r.run_root}/{spec.run_id}/artifacts')}",
+            f"TRAIN_WEBUI_RUN_ROOT={shlex.quote(r.run_root)}",
         ]
+        if spec.parent_run_id:
+            env_parts.append(f"TRAIN_WEBUI_INIT_FROM={shlex.quote(spec.parent_run_id)}")
         quoted_job_dir = shlex.quote(job_dir)
         # ssh先はsingularity instance内のsshdなので、コンテナで包まずそのままpythonを実行する
         inner = (
@@ -157,7 +181,7 @@ class RemoteController:
         )
         # `a && b && c &` だと連結全体が背景化され mkdir 前に run.pid を書きうるので、背景化部分だけ括弧で囲む
         return (
-            f"cd {shlex.quote(r.repo_dir)} && mkdir -p {quoted_job_dir} && "
+            f"cd {shlex.quote(r.repo_dir)} && mkdir -p {quoted_job_dir} {shlex.quote(f'{r.run_root}/{spec.run_id}/artifacts')} && "
             f"( setsid nohup sh -c {shlex.quote(inner)} > {quoted_job_dir}/run.log 2>&1 < /dev/null & "
             f"echo $! > {quoted_job_dir}/run.pid ) && cat {quoted_job_dir}/run.pid"
         )
@@ -179,12 +203,12 @@ class RemoteController:
                 return int(line)
         raise RemoteError(f"起動コマンドの出力からPIDを取得できませんでした: {text!r}")
 
-    def _rsync(self) -> None:
+    def _rsync(self, source: Path | None = None) -> None:
         r = self._settings.remote
         args = ["rsync", "-az", "--delete", "-e", self._ssh_dash_e()]
         for pattern in self._settings.sync_exclude:
             args += ["--exclude", pattern]
-        args += [f"{self._settings.repo_root}/", f"{r.user}@{r.host}:{r.repo_dir}/"]
+        args += [f"{source or self._settings.repo_root}/", f"{r.user}@{r.host}:{r.repo_dir}/"]
         proc = self._run(args, timeout=_RSYNC_TIMEOUT_SEC)
         self._check(proc, "コードの同期(rsync)")
 

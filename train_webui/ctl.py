@@ -3,7 +3,7 @@
 読み取り専用の `cli.py` とは別にしてある（こちらは server の HTTP API を叩いて状態を変える）。
 server が起動している必要がある。リポジトリ直下から実行する:
 
-    venv/bin/python -m train_webui.ctl draft <project> [--group G | --new-group] [--name N]
+    venv/bin/python -m train_webui.ctl draft <project> [--group G | --new-group] [--name N] [--continue-from RUN_ID | --rerun-of RUN_ID]
     venv/bin/python -m train_webui.ctl set <run_id> section.key=<TOMLリテラル> [...]
     venv/bin/python -m train_webui.ctl describe <project> <group> (--file パス | --text 文章 | 標準入力)
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
@@ -66,7 +66,8 @@ def _show_run(run: dict) -> None:
 
 
 def cmd_draft(api: Api, args: argparse.Namespace) -> None:
-    body = {"project": args.project, "group": args.group, "new_group": args.new_group, "group_name": args.name}
+    body = {"project": args.project, "group": args.group, "new_group": args.new_group, "group_name": args.name,
+            "parent_run_id": args.continue_from, "rerun_of": args.rerun_of}
     run = api.call("POST", "/api/runs/draft", body)
     _show_run(run)
     print("\n" + run["config_toml"])
@@ -139,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--group", help="既存 group に追加する時の group_id")
     s.add_argument("--new-group", action="store_true", help="新しい group を作る")
     s.add_argument("--name", help="新しい group の表示名")
+    s.add_argument("--continue-from", metavar="RUN_ID", help="この run の重みから続きを学習する下書き（同じ group・同じ config から）")
+    s.add_argument("--rerun-of", metavar="RUN_ID", help="この run を起動した時点のコードで再実行する下書き（同じ group・同じ config から）")
     s.set_defaults(func=cmd_draft)
 
     s = sub.add_parser("set", help="draft の config のキーを書き換える")

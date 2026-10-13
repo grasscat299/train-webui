@@ -94,6 +94,8 @@ train_webui/
 | `PUT /api/groups` | body `{"project": str, "group": str, "group_name": str}`。group の表示名だけを変える（group_id・config は変えない）。空なら400、group が無ければ404。返り値 `{"project", "group", "group_name"}` |
 | `GET /api/runs/{run_id}` | Run |
 | `PUT /api/runs/{run_id}/config` | body `{"config_toml": str}`。draftのみ（それ以外409）。TOMLとして不正なら400。`[wandb].group` が変わっていればgroupも更新。返り値 Run |
+| `POST /api/runs/draft` の追加キー | `parent_run_id`（その run の重みから続きを学習する下書き）／`rerun_of`（その run のコードで再実行する下書き）。どちらも元と同じ group・config で作る |
+| `POST /api/runs/{run_id}/artifacts` | body `{"name","kind","path","size"}`。client が重みなどの場所を登録する（204）。`GET` で一覧。Run に `artifacts`・`code_commit`・`parent_run_id` が付く |
 | `PUT /api/runs/{run_id}/comment` | body `{"comment": str}`。run へのコメント（メモ）を書き換える。run の状態によらずいつでも可。返り値 Run |
 | `POST /api/runs/{run_id}/start` | draft を起動（コード同期→config書き込み→trainジョブ起動）。busyなら409。学習用PCのGPUを他の人が使用中なら409、確認できなければ502（design.md §4。どちらも draft のまま）。返り値 Run（同期・起動は裏で進み、失敗したら run は failed・`error` に理由） |
 | `POST /api/runs/{run_id}/stop` | そのrunで running のジョブ（train か infer）を停止。無ければ409。返り値 Run |

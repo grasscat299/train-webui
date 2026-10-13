@@ -486,6 +486,61 @@ def log_image(label: str, fig_or_path, step: int | None) -> None:
         _warn(f"log_imageの処理に失敗しました: {e}")
 
 
+# --- 成果物（重みなど）。本体は学習用PCの run ごとのディレクトリに置き、場所だけをserverへ知らせる（design.md §3.5） ---
+
+DEFAULT_CHECKPOINT_NAME = "model.pt"
+
+
+def artifact_dir() -> Path | None:
+    """このrunの成果物の保存先。WebUIから起動されたときだけ（環境変数 TRAIN_WEBUI_ARTIFACT_DIR）。無ければ None。"""
+    value = os.environ.get("TRAIN_WEBUI_ARTIFACT_DIR")
+    return Path(value) if value else None
+
+
+def checkpoint_path(default, name: str = DEFAULT_CHECKPOINT_NAME) -> str:
+    """重みの保存先。WebUIから起動されたら run ごとの artifact_dir/name、手元で直接動かしたら default。"""
+    d = artifact_dir()
+    if d is None:
+        return str(default)
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / name)
+
+
+def init_checkpoint(name: str = DEFAULT_CHECKPOINT_NAME) -> str | None:
+    """引き継ぎ学習の元の run（TRAIN_WEBUI_INIT_FROM）の重みのパス。引き継ぎでなければ None。"""
+    parent = os.environ.get("TRAIN_WEBUI_INIT_FROM")
+    if not parent:
+        return None
+    root = os.environ.get("TRAIN_WEBUI_RUN_ROOT")
+    if not root:
+        raise RuntimeError("TRAIN_WEBUI_INIT_FROM があるのに TRAIN_WEBUI_RUN_ROOT がありません")
+    path = Path(root) / parent / "artifacts" / name
+    if not path.exists():
+        raise FileNotFoundError(f"引き継ぎ元の run {parent} の重みがありません: {path}")
+    return str(path)
+
+
+def start_checkpoint(save_path) -> str | None:
+    """学習の初期値にする重み。WebUIから起動: 引き継ぎ元の run の重み（引き継ぎでなければ None＝最初から）。
+    手元で直接起動: 従来どおり save_path があればそれ（続きから）、無ければ None。"""
+    if artifact_dir() is not None:
+        return init_checkpoint()
+    return str(save_path) if Path(save_path).exists() else None
+
+
+def log_artifact(path, kind: str, name: str | None) -> None:
+    """保存した成果物（重みなど）の場所をserverに登録する。ファイル本体は送らない。同じ名前は上書き。"""
+    if _client is None or not _client.can_send:
+        return
+    p = Path(path)
+    body = {"name": name or p.name, "kind": kind, "path": str(p.resolve()),
+            "size": p.stat().st_size if p.is_file() else None}
+    try:
+        _http_request("POST", f"{_client.base_url}/api/runs/{_client.run_id}/artifacts", body)
+    except Exception as e:
+        _warn(f"成果物の登録に失敗しました: {e}")
+
+
 def define_plot(label: str, kind: str, title: str | None, xlabel: str, ylabel: str,
                 xscale: str, yscale: str, xlim, ylim) -> None:
     if _client is None:

@@ -12,6 +12,7 @@ export interface RunSummary {
   project: string;
   group: string; // group_id（config の [wandb].group・checkpoint 名 model_{group_id}.pt に使う固定のID）
   group_name: string; // group の表示名（編集できる）
+  code_commit: string | null; // 起動時のコードを残した commit（無ければ null。無い run は同じコードで再実行できない）
   parent_run_id: string | null; // 引き継ぎ学習の元の run（config の init_from）。無ければ null
   comment: string; // run へのコメント（メモ）。いつでも編集できる
   origin: Origin;
@@ -32,7 +33,16 @@ export interface Job {
   error: string | null;
 }
 
+export interface Artifact {
+  name: string; // run 内で一意（例 model.pt）
+  kind: string; // checkpoint / samples など
+  path: string; // 学習用PC上のパス
+  size: number | null;
+  updated_at: string;
+}
+
 export interface Run extends RunSummary {
+  artifacts: Artifact[]; // 学習用PCに残った重みなど（本体はここに無く、場所だけ）
   // group（=モデル構成）の説明。Markdown。Claude がモデルの作りを知るための文書
   group_description: string;
   config_toml: string;
@@ -174,6 +184,8 @@ export interface Api {
   getState(): Promise<StateResp>;
   // newGroup=true なら group は不要（group_id と group_name は backend が自動で振る）
   createDraft(project: string, group: string | null, newGroup: boolean): Promise<Run>;
+  // 既存の run を元にした下書き。continue=その run の重みから続きを学習 / rerun=その run を起動した時点のコードで再実行
+  createDraftFrom(project: string, kind: 'continue' | 'rerun', runId: string): Promise<Run>;
   renameGroup(project: string, group: string, groupName: string): Promise<void>;
   updateComment(runId: string, comment: string): Promise<Run>;
   updateGroupDescription(project: string, group: string, description: string): Promise<void>;
@@ -223,6 +235,14 @@ const realApi: Api = {
     request<Run>('/api/runs/draft', {
       method: 'POST',
       body: JSON.stringify({ project, group, new_group: newGroup }),
+    }),
+  createDraftFrom: (project, kind, runId) =>
+    request<Run>('/api/runs/draft', {
+      method: 'POST',
+      body: JSON.stringify({
+        project, new_group: false,
+        ...(kind === 'continue' ? { parent_run_id: runId } : { rerun_of: runId }),
+      }),
     }),
   updateComment: (runId, comment) =>
     request<Run>(`/api/runs/${encodeURIComponent(runId)}/comment`, {

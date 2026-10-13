@@ -13,6 +13,8 @@ export interface TreeProps {
   onSelectRun: (runId: string) => void;
   onNewRunDraft: (project: string, group: string) => void;
   onNewGroup: (project: string) => void;
+  onContinueRun: (project: string, runId: string) => void;
+  onRerunRun: (project: string, runId: string) => void;
   onRenameGroup: (project: string, group: string, current: string) => void;
   onInfer: (project: string, group: string) => void;
   isRunChecked: (runId: string) => boolean;
@@ -86,7 +88,7 @@ function HeaderRow({ label, storeKey, className, children }: {
   );
 }
 
-function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onNewGroup, onRenameGroup, onInfer,
+function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onNewGroup, onContinueRun, onRerunRun, onRenameGroup, onInfer,
   isRunChecked, isGroupChecked, isProjectChecked, toggleRun, toggleGroup, toggleProject }: { node: ProjectNode } & TreeProps) {
   const [open, setOpen] = usePersistentState(`treeOpen.${node.project}`, true);
   return (
@@ -120,6 +122,8 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
               selectedRunId={selectedRunId}
               onSelectRun={onSelectRun}
               onNewRunDraft={onNewRunDraft}
+              onContinueRun={onContinueRun}
+              onRerunRun={onRerunRun}
               onRenameGroup={onRenameGroup}
               onInfer={onInfer}
               isRunChecked={isRunChecked}
@@ -134,7 +138,7 @@ function ProjectRow({ node, mode, busy, selectedRunId, onSelectRun, onNewRunDraf
   );
 }
 
-function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onRenameGroup, onInfer,
+function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNewRunDraft, onContinueRun, onRerunRun, onRenameGroup, onInfer,
   isRunChecked, isGroupChecked, toggleRun, toggleGroup }: {
   project: string;
   node: GroupNode;
@@ -143,6 +147,8 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
   selectedRunId: string | null;
   onSelectRun: (runId: string) => void;
   onNewRunDraft: (project: string, group: string) => void;
+  onContinueRun: (project: string, runId: string) => void;
+  onRerunRun: (project: string, runId: string) => void;
   onRenameGroup: (project: string, group: string, current: string) => void;
   onInfer: (project: string, group: string) => void;
   isRunChecked: (runId: string) => boolean;
@@ -173,6 +179,16 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
           {r.origin === 'cli' && <span className="cli-badge">CLI</span>}
         </button>
         <span className={`row-actions${copiedId === r.run_id ? ' shown' : ''}`}>
+          {r.status !== 'draft' && (
+            <IconButton title="この run の重みから続きを学習する（下書きを作る）" onClick={() => onContinueRun(project, r.run_id)}>
+              ↳
+            </IconButton>
+          )}
+          {r.code_commit && (
+            <IconButton title="この run を起動した時点のコードで再実行する（下書きを作る）" onClick={() => onRerunRun(project, r.run_id)}>
+              ⟲
+            </IconButton>
+          )}
           <IconButton title="run_id をコピー（Claude に貼ると、この run を読める）" onClick={() => copyRunId(r.run_id)}>
             {copiedId === r.run_id ? <CheckIcon /> : <CopyIcon />}
           </IconButton>

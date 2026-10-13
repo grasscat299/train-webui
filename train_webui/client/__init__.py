@@ -5,7 +5,8 @@ import inspect
 
 from . import _core
 
-__all__ = ["init", "log", "log_image", "log_table", "define_plot", "log_xy", "Plot", "finish"]
+__all__ = ["init", "log", "log_image", "log_table", "define_plot", "log_xy", "Plot", "finish",
+           "artifact_dir", "checkpoint_path", "init_checkpoint", "start_checkpoint", "log_artifact"]
 
 
 def init(new_run: bool = False, run_id: str | None = None, source: str | None = None) -> None:
@@ -51,6 +52,31 @@ def define_plot(
 def log_xy(label: str, x, y, series: str = "default", step: int | None = None) -> None:
     """軸つきグラフに点を追加する。x, y はスカラー同士か同じ長さの配列同士。"""
     _core.log_xy(label, x, y, series, step)
+
+
+def artifact_dir():
+    """このrunの成果物（重みなど）の保存先 Path。WebUIから起動されていなければ None。"""
+    return _core.artifact_dir()
+
+
+def checkpoint_path(default, name: str = "model.pt") -> str:
+    """重みの保存先。WebUIから起動されたら run ごとの専用ディレクトリ、手元で動かしたら default を返す。"""
+    return _core.checkpoint_path(default, name)
+
+
+def init_checkpoint(name: str = "model.pt") -> str | None:
+    """引き継ぎ学習（WebUIで「この run から続きを学習」した run）のとき、元の run の重みのパス。それ以外は None。"""
+    return _core.init_checkpoint(name)
+
+
+def start_checkpoint(save_path) -> str | None:
+    """学習の初期値にする重み。WebUIから起動なら引き継ぎ元の run の重み（無ければ None）、手元起動なら save_path があればそれ。"""
+    return _core.start_checkpoint(save_path)
+
+
+def log_artifact(path, kind: str = "checkpoint", name: str | None = None) -> None:
+    """保存した重みなどの場所をWebUIに登録する（本体は送らない）。init の後に呼ぶ。"""
+    _core.log_artifact(path, kind, name)
 
 
 def finish() -> None:

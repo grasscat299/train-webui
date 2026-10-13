@@ -19,14 +19,14 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import categories, discovery
+from . import categories, code_snapshot, discovery
 from .db import Database, now_iso
 from .decimate import decimate_minmax, decimate_stride
 from .ids import new_group_id, new_run_id
 from .jobs import JobBusyError, JobManager
 from .remote.types import RemoteControllerProtocol
 from .settings import Settings
-from .toml_utils import TomlValidationError, extract_group, extract_init_from, set_value, set_wandb_group
+from .toml_utils import TomlValidationError, extract_group, set_value, set_wandb_group
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
@@ -52,6 +52,16 @@ class DraftRequest(BaseModel):
     group: str | None = None
     new_group: bool
     group_name: str | None = None
+    # どちらかを指定すると、その run と同じ group に、その run の config を初期値にした下書きを作る
+    parent_run_id: str | None = None  # 引き継ぎ学習: その run の重みを初期値にして続きを学習する
+    rerun_of: str | None = None       # 同じコードで再実行: その run を起動した時点のコードで走らせる
+
+
+class ArtifactRegister(BaseModel):
+    name: str   # 成果物の名前（run 内で一意。例 "model.pt"）
+    kind: str   # "checkpoint" / "samples" など
+    path: str   # 学習用PC上のパス
+    size: int | None = None
 
 
 class GroupRenameRequest(BaseModel):
@@ -156,6 +166,7 @@ def _run_summary(row: dict, group_name: str | None = None) -> dict:
         "origin": row["origin"], "status": row["status"],
         "created_at": row["created_at"], "started_at": row["started_at"], "ended_at": row["ended_at"],
         "comment": row["comment"] or "", "parent_run_id": row.get("parent_run_id"),
+        "code_commit": row.get("code_commit"),
     }
 
 
@@ -171,6 +182,9 @@ def _run_detail(db: Database, row: dict) -> dict:
     detail = _run_summary(row, db.group_names(row["project"]).get(row["run_group"]))
     detail.update({
         "group_description": db.group_descriptions(row["project"]).get(row["run_group"], ""),
+        "artifacts": [
+            {k: a[k] for k in ("name", "kind", "path", "size", "updated_at")} for a in db.list_artifacts(row["run_id"])
+        ],
         "config_toml": row["config_toml"], "git_commit": row["git_commit"], "git_diff": row["git_diff"],
         "git_untracked": row["git_untracked"], "git_info_source": row["git_info_source"],
         "hostname": row["hostname"], "pid": row["pid"], "last_heartbeat_at": row["last_heartbeat_at"],
@@ -303,6 +317,7 @@ def create_app(
     remote: RemoteControllerProtocol | None = None,
     start_background: bool = True,
 ) -> FastAPI:
+    real_remote = remote is None
     if remote is None:
         from .remote import RemoteController  # 遅延import（担当Cの実体。テストでは差し替える）
 
@@ -311,7 +326,13 @@ def create_app(
     settings.server.media_dir.mkdir(parents=True, exist_ok=True)
     db = Database(settings.server.db_path)
     db.init_schema()
-    job_manager = JobManager(settings, db, remote, launch_in_background=start_background)
+    snapshot_kwargs: dict = {}
+    if real_remote:  # テストの偽 remote では、リポジトリが git とは限らないのでコードの記録・復元をしない
+        snapshot_kwargs = {
+            "snapshot_code": lambda run_id: code_snapshot.snapshot_code(settings.repo_root, run_id),
+            "export_code": lambda commit, dest: code_snapshot.export_commit(settings.repo_root, commit, dest),
+        }
+    job_manager = JobManager(settings, db, remote, launch_in_background=start_background, **snapshot_kwargs)
     if start_background:
         job_manager.start_background()
 
@@ -381,6 +402,16 @@ def create_app(
         # 使い回している一覧に無ければ、新しく作られた project かもしれないので探し直してから判定する
         if body.project not in get_projects() and body.project not in get_projects(force=True):
             raise HTTPException(404, "project が見つかりません")
+        source = None
+        if body.parent_run_id or body.rerun_of:
+            source = db.get_run(body.parent_run_id or body.rerun_of)
+            if source is None or source["project"] != body.project:
+                raise HTTPException(404, "元の run が見つかりません")
+            if source["status"] == "draft":
+                raise HTTPException(400, "下書きの run は元にできません")
+            if body.rerun_of and not source.get("code_commit"):
+                raise HTTPException(400, "この run はコードを記録していないため、同じコードでは再実行できません")
+            body = body.model_copy(update={"group": source["run_group"], "new_group": False})
         if body.new_group:
             group = body.group or new_group_id(exists=lambda g: db.group_exists(body.project, g))
             group_name = (body.group_name or "").strip() or db.next_group_name(body.project)
@@ -389,7 +420,8 @@ def create_app(
         else:
             raise HTTPException(400, "既存groupへの追加では group（group_id）が必要です")
         try:
-            config_toml = _build_draft_config(db, settings, body.project, group, body.new_group)
+            config_toml = source["config_toml"] if source else _build_draft_config(
+                db, settings, body.project, group, body.new_group)
         except TomlValidationError as e:
             raise HTTPException(400, str(e)) from e
         db.ensure_group(body.project, group, group_name)
@@ -398,9 +430,12 @@ def create_app(
         db.create_run(
             run_id=run_id, project=body.project, run_group=group,
             display_name=db.next_display_name(body.project, group), origin="webui", status="draft",
-            config_toml=config_toml, parent_run_id=extract_init_from(config_toml),
-            git_commit=None, git_diff=None, git_untracked=None,
-            git_info_source=None, created_at=now, started_at=None, ended_at=None,
+            config_toml=config_toml, parent_run_id=body.parent_run_id,
+            code_commit=source["code_commit"] if body.rerun_of else None,
+            git_commit=source["git_commit"] if body.rerun_of else None,
+            git_diff=source["git_diff"] if body.rerun_of else None,
+            git_untracked=source["git_untracked"] if body.rerun_of else None,
+            git_info_source=source["git_info_source"] if body.rerun_of else None, created_at=now, started_at=None, ended_at=None,
             last_heartbeat_at=None, hostname=None, pid=None, exit_code=None, error=None,
         )
         return _run_detail(db, db.get_run(run_id))
@@ -449,8 +484,7 @@ def create_app(
         except TomlValidationError as e:
             raise HTTPException(400, str(e)) from e
         db.ensure_group(run["project"], group)  # config で未登録の group_id に書き換えられたら、その group を作る
-        fields: dict = {"config_toml": body.config_toml, "run_group": group,
-                        "parent_run_id": extract_init_from(body.config_toml)}
+        fields: dict = {"config_toml": body.config_toml, "run_group": group}
         if group != run["run_group"]:  # 別groupに移ったら、そのgroupでの次の番号を振り直す
             fields["display_name"] = db.next_display_name(run["project"], group)
         db.update_run(run_id, **fields)
@@ -556,6 +590,11 @@ def create_app(
         if image_dir.exists():
             shutil.rmtree(image_dir)
         db.delete_run(run_id)
+        code_snapshot.delete_ref(settings.repo_root, run_id)
+        try:
+            remote.remove_run_files(run_id)  # 学習用PCの重み・ログ。繋がらなくても run の削除は成功させる
+        except Exception:  # noqa: BLE001
+            pass
         return Response(status_code=204)
 
     @app.post("/api/groups/infer")
@@ -633,6 +672,20 @@ def create_app(
             hostname=body.hostname, pid=body.pid, exit_code=None, error=None,
         )
         return {"run_id": run_id, "warning": warning}
+
+    @app.post("/api/runs/{run_id}/artifacts", status_code=204)
+    def client_register_artifact(run_id: str, body: ArtifactRegister) -> Response:
+        """client（学習プロセス）が、重みなどを artifact_dir に保存したあとに場所を知らせる。本体は送らない。"""
+        if db.get_run(run_id) is None:
+            raise HTTPException(404, "run が見つかりません")
+        db.upsert_artifact(run_id, body.name, body.kind, body.path, body.size, now_iso())
+        return Response(status_code=204)
+
+    @app.get("/api/runs/{run_id}/artifacts")
+    def list_artifacts(run_id: str) -> list[dict]:
+        if db.get_run(run_id) is None:
+            raise HTTPException(404, "run が見つかりません")
+        return db.list_artifacts(run_id)
 
     @app.post("/api/runs/{run_id}/heartbeat", status_code=204)
     def heartbeat(run_id: str) -> Response:

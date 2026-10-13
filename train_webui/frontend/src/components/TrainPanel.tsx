@@ -274,6 +274,21 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
             </details>
           )}
 
+          {(run.code_commit || run.parent_run_id || run.artifacts.length > 0) && (
+            <details className="block">
+              <summary className="block-title">コード・重み</summary>
+              <ul className="run-files">
+                {run.parent_run_id && <li>引き継ぎ元: <code>{run.parent_run_id}</code>（この run の重みから学習を始めた）</li>}
+                {run.code_commit && <li>コード: <code>{run.code_commit.slice(0, 10)}</code>（<code>refs/webui/runs/{run.run_id}</code>）</li>}
+                {run.artifacts.map((a) => (
+                  <li key={a.name}>
+                    {a.name}（{a.kind}{a.size != null ? `、${(a.size / 1024 / 1024).toFixed(1)} MB` : ''}）: <code>{a.path}</code>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           <details className="block">
             <summary className="block-title">config</summary>
             <textarea className="config-editor" value={run.config_toml} readOnly rows={14} />

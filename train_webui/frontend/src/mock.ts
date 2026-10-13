@@ -18,7 +18,7 @@ import type {
   Plot,
 } from './api';
 
-type StoredRun = Omit<Run, 'jobs' | 'group_name' | 'group_description'>;
+type StoredRun = Omit<Run, 'jobs' | 'group_name' | 'group_description' | 'artifacts'>;
 
 // group の表示名（backend の groups テーブル相当）。未登録の group は group_id をそのまま表示名にする
 const groupNames = new Map<string, string>();
@@ -100,8 +100,8 @@ function nextDisplayName(project: string, group: string): string {
   return `v${Math.max(0, ...used) + 1}`;
 }
 
-function makeRun(fields: Omit<StoredRun, 'display_name' | 'comment' | 'parent_run_id'>): StoredRun {
-  const run: StoredRun = { ...fields, display_name: nextDisplayName(fields.project, fields.group), comment: '', parent_run_id: null };
+function makeRun(fields: Omit<StoredRun, 'display_name' | 'comment' | 'parent_run_id' | 'code_commit'>): StoredRun {
+  const run: StoredRun = { ...fields, display_name: nextDisplayName(fields.project, fields.group), comment: '', parent_run_id: null, code_commit: null };
   runs.set(run.run_id, run);
   if (!jobsByRun.has(run.run_id)) jobsByRun.set(run.run_id, []);
   if (!resultsByRun.has(run.run_id)) resultsByRun.set(run.run_id, []);
@@ -188,7 +188,7 @@ function getOrThrow(runId: string): StoredRun {
 }
 
 function cloneRun(run: StoredRun): Run {
-  return { ...run, group_name: groupNameOf(run.project, run.group), group_description: groupDescriptionOf(run.project, run.group), jobs: (jobsByRun.get(run.run_id) ?? []).slice() };
+  return { ...run, group_name: groupNameOf(run.project, run.group), group_description: groupDescriptionOf(run.project, run.group), artifacts: [], jobs: (jobsByRun.get(run.run_id) ?? []).slice() };
 }
 
 function toSummary(run: StoredRun): RunSummary {
@@ -196,7 +196,8 @@ function toSummary(run: StoredRun): RunSummary {
     run_id: run.run_id,
     display_name: run.display_name,
     comment: run.comment,
-    parent_run_id: null,
+    parent_run_id: run.parent_run_id,
+    code_commit: run.code_commit,
     project: run.project,
     group: run.group,
     group_name: groupNameOf(run.project, run.group),
@@ -551,6 +552,22 @@ async function getState(): Promise<StateResp> {
   return computeState();
 }
 
+async function createDraftFrom(project: string, kind: 'continue' | 'rerun', runId: string): Promise<Run> {
+  const src = runs.get(runId);
+  if (!src) throw new Error('元の run が見つかりません');
+  if (kind === 'rerun' && !src.code_commit) throw new Error('この run はコードを記録していないため、同じコードでは再実行できません');
+  const draft = makeRun({
+    run_id: generateRunId(), project, group: src.group, origin: 'webui', status: 'draft', created_at: isoNow(),
+    started_at: null, ended_at: null, config_toml: src.config_toml, git_commit: null, git_diff: null,
+    git_untracked: null, git_info_source: null, hostname: null, pid: null, last_heartbeat_at: null,
+    exit_code: null, error: null,
+  });
+  draft.parent_run_id = kind === 'continue' ? runId : null;
+  draft.code_commit = kind === 'rerun' ? src.code_commit : null;
+  runs.set(draft.run_id, draft);
+  return cloneRun(draft);
+}
+
 async function createDraft(project: string, groupArg: string | null, newGroup: boolean): Promise<Run> {
   const runId = generateRunId();
   let group = groupArg ?? '';
@@ -769,6 +786,7 @@ export const mockApi: Api = {
   rescan: getTree,
   getState,
   createDraft,
+  createDraftFrom,
   renameGroup,
   updateComment,
   updateGroupDescription,

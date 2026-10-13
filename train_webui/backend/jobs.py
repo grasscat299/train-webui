@@ -5,10 +5,11 @@ remote（学習用PC操作）呼び出しで例外が出た場合は何でも捕
 """
 from __future__ import annotations
 
+import tempfile
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .db import Database, now_iso
 from .ids import new_job_id
@@ -22,7 +23,13 @@ class JobBusyError(Exception):
 
 class JobManager:
     def __init__(self, settings: Settings, db: Database, remote: RemoteControllerProtocol,
-                 launch_in_background: bool = True) -> None:
+                 launch_in_background: bool = True,
+                 snapshot_code: Callable[[str], str] | None = None,
+                 export_code: Callable[[str, Path], None] | None = None) -> None:
+        # snapshot_code(run_id) -> commit: 起動時のコードを ref にして残す。export_code(commit, dest): 過去のコードを取り出す
+        # どちらも None のとき（テスト等）はコードの記録・復元をしない
+        self._snapshot_code = snapshot_code
+        self._export_code = export_code
         self._settings = settings
         self._db = db
         self._remote = remote
@@ -101,23 +108,37 @@ class JobManager:
 
     def _launch_train(self, run_id: str, job_id: str, run: dict) -> None:
         try:
-            sync_info = self._remote.sync_code()
-            self._db.create_sync(
-                synced_at=now_iso(), git_commit=sync_info.git_commit,
-                git_diff=sync_info.git_diff, git_untracked=sync_info.git_untracked,
-            )
-            self._db.update_run(
-                run_id, git_commit=sync_info.git_commit, git_diff=sync_info.git_diff,
-                git_untracked=sync_info.git_untracked, git_info_source="sync",
-            )
+            if run.get("code_commit"):
+                # 過去の run のコードで再実行する下書き。ローカルの作業ツリーではなく、記録した commit を送る
+                self._sync_recorded_code(run["code_commit"])
+            else:
+                sync_info = self._remote.sync_code()
+                self._db.create_sync(
+                    synced_at=now_iso(), git_commit=sync_info.git_commit,
+                    git_diff=sync_info.git_diff, git_untracked=sync_info.git_untracked,
+                )
+                self._db.update_run(
+                    run_id, git_commit=sync_info.git_commit, git_diff=sync_info.git_diff,
+                    git_untracked=sync_info.git_untracked, git_info_source="sync",
+                )
+                if self._snapshot_code is not None:
+                    self._db.update_run(run_id, code_commit=self._snapshot_code(run_id))
             spec = LaunchSpec(
                 run_id=run_id, job_id=job_id, kind="train",
                 project_dir=run["project"], config_toml=run["config_toml"],
+                parent_run_id=run.get("parent_run_id"),
             )
             result = self._remote.launch(spec)
             self._db.update_job(job_id, pid=result.pid, job_dir=result.job_dir)
         except Exception as e:  # noqa: BLE001 - remoteの失敗は種類を問わずfailedにする
             self._fail_job_and_run(job_id, run_id, str(e), also_run=True)
+
+    def _sync_recorded_code(self, commit: str) -> None:
+        if self._export_code is None:
+            raise RuntimeError("過去のコードを取り出せません（コードの記録が無効です）")
+        with tempfile.TemporaryDirectory() as tmp:
+            self._export_code(commit, Path(tmp))
+            self._remote.sync_code(Path(tmp))
 
     def start_infer(self, run_id: str, project: str, config_toml: str | None = None) -> dict:
         """groupの[infer]ボタン。対象runは変えず、jobだけ作って起動する。
@@ -143,7 +164,7 @@ class JobManager:
             spec = LaunchSpec(
                 run_id=run_id, job_id=job_id, kind="infer",
                 project_dir=project, config_toml=run["config_toml"],
-            )
+            )  # 推論は parent を使わない（その run 自身の重みを artifacts から読む）
             result = self._remote.launch(spec)
             self._db.update_job(job_id, pid=result.pid, job_dir=result.job_dir)
         except Exception as e:  # noqa: BLE001

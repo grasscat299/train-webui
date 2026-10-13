@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS syncs (
     git_untracked TEXT
 );
 
+-- run が学習用PCに残した成果物（重み・サンプルなど）。本体は学習用PCの run_root/<run_id>/artifacts/ にあり、ここには場所だけ持つ
+CREATE TABLE IF NOT EXISTS artifacts (
+    run_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    path TEXT NOT NULL,
+    size INTEGER,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
@@ -158,6 +169,8 @@ class Database:
                 conn.execute("ALTER TABLE runs ADD COLUMN display_name TEXT")
             if "comment" not in cols:  # run へのコメント（メモ）。追加前のDBは空文字で移行
                 conn.execute("ALTER TABLE runs ADD COLUMN comment TEXT NOT NULL DEFAULT ''")
+            if "code_commit" not in cols:  # 起動時のコードを残した commit（refs/webui/runs/<run_id> が指す）。無ければ NULL
+                conn.execute("ALTER TABLE runs ADD COLUMN code_commit TEXT")
             if "parent_run_id" not in cols:  # 引き継ぎ学習の元になった run（config の init_from）。追加前のDBは NULL
                 conn.execute("ALTER TABLE runs ADD COLUMN parent_run_id TEXT")
             rows = conn.execute(
@@ -319,7 +332,22 @@ class Database:
             conn.execute("DELETE FROM plot_points WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM plots WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM jobs WHERE run_id = ?", (run_id,))
+            conn.execute("DELETE FROM artifacts WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+
+    def upsert_artifact(self, run_id: str, name: str, kind: str, path: str, size: int | None, updated_at: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO artifacts (run_id, name, kind, path, size, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(run_id, name) DO UPDATE SET kind = excluded.kind, path = excluded.path, "
+                "size = excluded.size, updated_at = excluded.updated_at",
+                (run_id, name, kind, path, size, updated_at),
+            )
+
+    def list_artifacts(self, run_id: str) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM artifacts WHERE run_id = ? ORDER BY name", (run_id,)).fetchall()
+        return [dict(r) for r in rows]
 
     def list_runs_by_project(self, project: str) -> list[dict]:
         with self._connect() as conn:

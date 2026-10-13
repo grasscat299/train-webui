@@ -202,6 +202,18 @@ export default function App() {
     }
   };
 
+  // 既存の run を元にした下書き（引き継ぎ学習 / 同じコードで再実行）。元の run と同じ group に作られる
+  const handleDraftFromRun = async (project: string, kind: 'continue' | 'rerun', runId: string) => {
+    try {
+      const run = await api.createDraftFrom(project, kind, runId);
+      await rescan();
+      setSelectedRunId(run.run_id);
+      setTab('train');
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   // group_id / group_name は backend が自動で振る（名前は後からツリーの ✎ で変えられる）
   const handleNewGroup = async (project: string) => {
     try {
@@ -270,6 +282,8 @@ export default function App() {
             selectedRunId={selectedRunId}
             onSelectRun={setSelectedRunId}
             onNewRunDraft={handleNewRunDraft}
+            onContinueRun={(project, runId) => handleDraftFromRun(project, 'continue', runId)}
+            onRerunRun={(project, runId) => handleDraftFromRun(project, 'rerun', runId)}
             onNewGroup={handleNewGroup}
             onRenameGroup={handleRenameGroup}
             onInfer={handleInfer}

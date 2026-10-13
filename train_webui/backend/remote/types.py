@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -24,6 +25,7 @@ class LaunchSpec:
     kind: Literal["train", "infer"]
     project_dir: str   # リポジトリ直下からの相対パス（例 "src/world_model_v1"）
     config_toml: str   # 学習用PCの <repo_dir>/<project_dir>/config.toml に書き込む内容
+    parent_run_id: str | None = None  # 引き継ぎ学習の元の run（その run の重みを初期値にする）
 
 
 @dataclass(frozen=True)
@@ -57,8 +59,12 @@ class CommandRunner(Protocol):
 
 
 class RemoteControllerProtocol(Protocol):
-    def sync_code(self) -> SyncInfo:
-        """ローカルのリポジトリ全体を rsync --delete で学習用PCへ送り、送った時点のgit情報を返す。"""
+    def sync_code(self, source_dir: Path | None = None) -> SyncInfo:
+        """ローカルのリポジトリ全体（source_dir があればそのディレクトリ）を rsync --delete で学習用PCへ送り、
+        送った時点のgit情報を返す。"""
+
+    def remove_run_files(self, run_id: str) -> None:
+        """学習用PCの <run_root>/<run_id>/（重み・ログなど）を消す。無ければ何もしない。"""
 
     def launch(self, spec: LaunchSpec) -> LaunchResult:
         """config.toml を書き込み、setsid+nohup でジョブを起動する（sync_code は呼ばない）。"""

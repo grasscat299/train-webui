@@ -720,3 +720,5 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
 .tree-workspace-row { font-weight: 700; }
 .tree-stage-row { font-weight: 600; opacity: 0.9; }
 .run-lineage { opacity: 0.6; margin-right: 2px; }
+.run-files { margin: 4px 0; padding-left: 18px; font-size: 12px; }
+.run-files code { word-break: break-all; }

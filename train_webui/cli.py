@@ -146,6 +146,12 @@ class Store:
         listing = ", ".join(f"{r['display_name']}({r['status']})" for r in runs)
         raise CliError(f"run が見つかりません: {name}（候補: {listing}）")
 
+    def artifacts(self, run_id: str) -> list[sqlite3.Row]:
+        try:
+            return self.q("SELECT * FROM artifacts WHERE run_id = ? ORDER BY name", (run_id,))
+        except sqlite3.OperationalError:  # artifacts 追加前のDB（server がまだ起動し直されていない）
+            return []
+
     def plots(self, run_id: str) -> list[sqlite3.Row]:
         return self.q("SELECT * FROM plots WHERE run_id = ? ORDER BY label", (run_id,))
 
@@ -271,6 +277,14 @@ def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int, l
     print(f"# {_run_title(store, run)}")
     print(f"run_id: {run['run_id']}  status: {run['status']}  origin: {run['origin']}  group_id: {run['run_group']}")
     print(f"開始: {run['started_at'] or '-'}  終了: {run['ended_at'] or '-'}")
+    keys = run.keys()  # 列の追加前のDB（server がまだ起動し直されていない）でも落ちないようにする
+    if "parent_run_id" in keys and run["parent_run_id"]:
+        print(f"引き継ぎ元: {run['parent_run_id']}（その run の重みから学習を始めた）")
+    if "code_commit" in keys and run["code_commit"]:
+        print(f"コード: {run['code_commit'][:10]}（git の refs/webui/runs/{run['run_id']}。`git diff <ref1> <ref2>` で run 同士を比べられる）")
+    for a in store.artifacts(run["run_id"]):
+        size = f"{a['size'] / 1024 / 1024:.1f} MB" if a["size"] is not None else "-"
+        print(f"成果物: {a['name']} ({a['kind']}, {size})  {a['path']}")
     if describe:
         print()
         print_descriptions(store, [run])

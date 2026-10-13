@@ -191,3 +191,36 @@ def test_table_requires_name_and_conflicts_with_metric_label(app_factory):
     assert post({**base, "kind": "table"}).status_code == 400
     assert post({**base, "kind": "metric", "step": 1}).status_code == 204
     assert post({**base, "kind": "table", "name": "a"}).status_code == 400
+
+
+def test_artifact_helpers(monkeypatch, tmp_path):
+    from train_webui import client
+
+    for k in ("TRAIN_WEBUI_ARTIFACT_DIR", "TRAIN_WEBUI_RUN_ROOT", "TRAIN_WEBUI_INIT_FROM"):
+        monkeypatch.delenv(k, raising=False)
+    legacy = tmp_path / "checkpoints" / "model_g.pt"
+    # 手元で直接動かしたとき: 従来のパス。ファイルがあれば続きから
+    assert client.checkpoint_path(legacy) == str(legacy)
+    assert client.start_checkpoint(legacy) is None
+    legacy.parent.mkdir()
+    legacy.write_bytes(b"x")
+    assert client.start_checkpoint(legacy) == str(legacy)
+
+    # WebUIから起動したとき: run ごとのディレクトリ。引き継ぎでなければ最初から
+    art = tmp_path / "runs" / "r2" / "artifacts"
+    monkeypatch.setenv("TRAIN_WEBUI_ARTIFACT_DIR", str(art))
+    monkeypatch.setenv("TRAIN_WEBUI_RUN_ROOT", str(tmp_path / "runs"))
+    assert client.checkpoint_path(legacy) == str(art / "model.pt")
+    assert client.start_checkpoint(legacy) is None
+
+    # 引き継ぎ: 元の run の重みを使う。無ければ明示的に失敗する
+    monkeypatch.setenv("TRAIN_WEBUI_INIT_FROM", "r1")
+    try:
+        client.start_checkpoint(legacy)
+        raise AssertionError("FileNotFoundError になるはず")
+    except FileNotFoundError:
+        pass
+    parent = tmp_path / "runs" / "r1" / "artifacts"
+    parent.mkdir(parents=True)
+    (parent / "model.pt").write_bytes(b"y")
+    assert client.start_checkpoint(legacy) == str(parent / "model.pt")

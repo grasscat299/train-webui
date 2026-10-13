@@ -126,8 +126,8 @@ WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマ�
 
 - 画面のツリーは `プロジェクト > 段階（本番 / scratch）> ディレクトリ（§2 の project。`src/enemy_world_model` など）
   > group（モデル。ハイパラ構成）> run` の順。groupまでを常に表示し、group内のrunは初期状態では畳む。
-- **引き継ぎ学習**: config の `init_from = "<元の run_id>"`（どのセクションでも可）を `runs.parent_run_id` に保存し、
-  ツリーでは元の run の下に `↳` で出す（親が同じ group に無ければ根に出る）。config の編集・下書き作成のたびに更新する。
+- **引き継ぎ学習**: 「この run から続きを学習」（§3.5）で作った run は `runs.parent_run_id` に元の run を持ち、
+  ツリーでは元の run の下に `↳` で出す（親が同じ group に無ければ根に出る）。
 - プロジェクト・段階・ディレクトリはパスから毎回計算し、DBには保存しない（移動・改名でずれないように）。
   `train_webui/categories.toml`（git管理）の `[[project]] match`（glob）でプロジェクトを、`[stages]`
   （パスの先頭の要素 → 段階名）で段階を決める。合致しなければ「未分類」・先頭の要素名。
@@ -162,6 +162,32 @@ WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマ�
   上書きで競合しない）。
 - **run の削除**: draft と、終了済み（finished / failed / stopped）の run は削除できる（紐づく結果も
   削除）。running の run は削除できない。
+
+## 3.5 run ごとのデータ管理（コード・重み・config）
+
+1つの run が「コード・config・重み・結果」をまとめて持つ。大きいものは DB に入れず、場所だけ DB に持つ。
+
+| 種類 | 置き場所 | DB に持つもの |
+|---|---|---|
+| config | DB（`runs.config_toml`）＋学習用PCの `<run_root>/<run_id>/config.toml` | 本文 |
+| コード | ローカルgitの隠しref `refs/webui/runs/<run_id>`（作業ツリー全体を HEAD を親にした1 commit にしたもの。未コミット・未追跡も含み、.gitignore 済みは含まない） | `runs.code_commit` |
+| 重み・サンプル | 学習用PCの `<run_root>/<run_id>/artifacts/`（コンテナ内から見たパス。`run_root` は §1.6 のとおり bind 済みで、instance を止めても残る） | `artifacts`（run_id, name, kind, path, size） |
+| 指標・画像・ログ | 従来どおり（`results`/`plots`/`media/`） | 従来どおり |
+
+- **保存**: 学習を起動するとき、①作業ツリーを ref に残して `code_commit` に記録 ②コードを rsync ③学習用PCに
+  `<run_root>/<run_id>/artifacts/` を作り、環境変数 `TRAIN_WEBUI_ARTIFACT_DIR`（その dir）・`TRAIN_WEBUI_RUN_ROOT` を渡して起動。
+  `main.py` は `webui.checkpoint_path(従来のパス)` で重みの保存先を決め（WebUI起動なら `artifacts/model.pt`、手元起動なら従来のパス）、
+  保存後に `webui.log_artifact(path)` で場所を登録する（本体はHTTPで送らない）。
+- **引き継ぎ学習**: 「この run から続きを学習」で、元の run と同じ group・同じ config の下書きを作り `runs.parent_run_id` に元を記録する。
+  起動時に `TRAIN_WEBUI_INIT_FROM=<元のrun_id>` を渡し、`webui.start_checkpoint(save_path)` が `<run_root>/<元>/artifacts/model.pt` を返す。
+  元の重みは書き換えない（新しい run は自分の `artifacts/` に保存する）。引き継ぎでない run は最初から学習する
+  （手元で直接動かしたときだけ、従来どおり既存の重みがあれば続きから）。
+- **同じコードで再実行**: 「同じコードで再実行」で、元の run の config と `code_commit` を持つ下書きを作る（`code_commit` が無い古い run は不可）。
+  起動時は作業ツリーではなく `git archive` で取り出した commit の中身を rsync する。run 同士のコード差分は `git diff <ref1> <ref2>`。
+- **推論**: その run 自身の `artifacts/model.pt` を読む（コードは今の作業ツリー。古い重みを新しい評価コードで試せる）。
+- **削除**: run を消すと、DB・画像・ログに加えて ref と学習用PCの `<run_root>/<run_id>/` も消す（学習用PCに繋がらなくても run の削除は成功する）。
+- 古い run（`code_commit` / `artifacts` が無いもの）は従来どおり読める。`git_commit`/`git_diff`/`git_untracked` 列は
+  これらの run の表示用に残している。
 
 ## 4. ジョブ起動・停止・終了検知
 

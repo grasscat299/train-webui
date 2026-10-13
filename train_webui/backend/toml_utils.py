@@ -114,19 +114,3 @@ def set_value(text: str, dotted_key: str, literal: str, add_missing: bool = Fals
     parse_toml(result)
     return result
 
-
-def extract_init_from(text: str) -> str | None:
-    """config の `init_from`（引き継ぎ学習の元の run_id）。どのセクションに書いてあってもよい。無ければ None。"""
-    def find(d: dict) -> str | None:
-        v = d.get("init_from")
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-        for sub in d.values():
-            if isinstance(sub, dict) and (found := find(sub)):
-                return found
-        return None
-
-    try:
-        return find(parse_toml(text))
-    except TomlValidationError:
-        return None

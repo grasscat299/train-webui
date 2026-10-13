@@ -14,6 +14,8 @@ class FakeRemote:
 
     def __init__(self) -> None:
         self.sync_calls = 0
+        self.sync_sources: list = []
+        self.removed_runs: list[str] = []
         self.launches: list[LaunchSpec] = []
         self.stops: list[int] = []
         self.poll_results: dict[int, JobState] = {}
@@ -24,8 +26,12 @@ class FakeRemote:
         self.fail_gpu = False
         self._next_pid = 1000
 
-    def sync_code(self) -> SyncInfo:
+    def remove_run_files(self, run_id: str) -> None:
+        self.removed_runs.append(run_id)
+
+    def sync_code(self, source_dir=None) -> SyncInfo:
         self.sync_calls += 1
+        self.sync_sources.append(source_dir)
         if self.fail_sync:
             raise RuntimeError("sync に失敗しました（fake）")
         return SyncInfo(git_commit="abc123", git_diff="diff", git_untracked="{}")
