@@ -120,6 +120,15 @@ export interface Plot {
   last_point_id: number | null;
 }
 
+// x を一定の幅ごとにまとめて平均したグラフ（全点から backend が作る）。epoch=true なら x は epoch 番号
+export interface BinnedPlot {
+  label: string;
+  bin: string; // "epoch" か幅の数値
+  width: number;
+  epoch: boolean;
+  series: { name: string; points: [number, number][]; total_points: number }[];
+}
+
 export interface GroupNode {
   group: string; // group_id
   group_name: string;
@@ -199,6 +208,8 @@ export interface Api {
   getResults(runId: string, kind?: 'metric' | 'image' | 'table', label?: string): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
   getPlots(runId: string, afterId?: number | null): Promise<Plot[]>;
+  // line のグラフを x の幅ごとに平均して取る。bin は "epoch"（config の steps_per_epoch）か幅の数値
+  getBinnedPlot(runId: string, label: string, bin: string): Promise<BinnedPlot>;
   // 画面で今見ている構成を server に送る（Claude が `cli view` で読む）
   listComparisons(): Promise<Comparison[]>;
   createComparison(name: string, body: ComparisonBody): Promise<Comparison>;
@@ -287,6 +298,10 @@ const realApi: Api = {
   getPlots: (runId, afterId) =>
     request<Plot[]>(
       `/api/runs/${encodeURIComponent(runId)}/plots${afterId != null ? `?after_id=${afterId}` : ''}`,
+    ),
+  getBinnedPlot: (runId, label, bin) =>
+    request<BinnedPlot>(
+      `/api/runs/${encodeURIComponent(runId)}/plots/binned?label=${encodeURIComponent(label)}&bin=${encodeURIComponent(bin)}`,
     ),
   listComparisons: () => request<Comparison[]>('/api/comparisons'),
   createComparison: (name, body) =>

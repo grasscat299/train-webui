@@ -19,14 +19,14 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import categories, code_snapshot, discovery
+from . import binning, categories, code_snapshot, discovery
 from .db import Database, now_iso
 from .decimate import decimate_minmax, decimate_stride
 from .ids import new_group_id, new_run_id
 from .jobs import JobBusyError, JobManager
 from .remote.types import RemoteControllerProtocol
 from .settings import Settings
-from .toml_utils import TomlValidationError, extract_group, set_value, set_wandb_group
+from .toml_utils import TomlValidationError, extract_group, find_number, set_value, set_wandb_group
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
@@ -645,6 +645,43 @@ def create_app(
             raise HTTPException(404, "run が見つかりません")
         upto = db.max_plot_point_id(run_id) or 0
         return [_plot_public(db, row, after_id, max_points, upto) for row in db.list_plots(run_id, label=label)]
+
+    @app.get("/api/runs/{run_id}/plots/binned")
+    def get_binned_plot(run_id: str, label: str, bin: str = "epoch") -> dict:
+        """line のグラフを、x を一定の幅ごとに平均して返す（全点から作る。間引かない）。
+
+        bin="epoch": その run の config の steps_per_epoch を幅にし、x は epoch 番号（1始まり）にする。
+        bin=<数値>: その幅（x の単位）ごとに平均し、x は各区間の終わりの値にする。
+        """
+        run = db.get_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run が見つかりません")
+        plot = next((p for p in db.list_plots(run_id, label=label)), None)
+        if plot is None:
+            raise HTTPException(404, "グラフが見つかりません")
+        if plot["kind"] != "line":
+            raise HTTPException(400, "平均できるのは line のグラフだけです")
+        if bin == "epoch":
+            width = find_number(run["config_toml"], "steps_per_epoch")
+            if width is None or width <= 0:
+                raise HTTPException(400, "config に steps_per_epoch が無いため epoch ごとにはできません（数値で幅を指定してください）")
+            to_x = lambda k: k + 1  # noqa: E731 - epoch 番号（1始まり）
+        else:
+            try:
+                width = float(bin)
+            except ValueError:
+                raise HTTPException(400, "bin は \"epoch\" か正の数にしてください") from None
+            if not width > 0:
+                raise HTTPException(400, "bin は \"epoch\" か正の数にしてください")
+            to_x = lambda k: (k + 1) * width  # noqa: E731 - 区間の終わり
+        upto = db.max_plot_point_id(run_id) or 0
+        series = []
+        for stat in db.list_plot_series_stats(run_id, label, upto):
+            pts = db.list_plot_points(run_id, label, stat["series"], upto)
+            bins = binning.bin_mean(pts, width)
+            series.append({"name": stat["series"], "points": [[to_x(k), mean] for k, mean, _n in bins],
+                           "total_points": stat["total"]})
+        return {"label": label, "bin": bin, "width": width, "epoch": bin == "epoch", "series": series}
 
     @app.get("/api/labels")
     def get_labels(run_ids: str = "") -> list[dict]:

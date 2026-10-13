@@ -722,3 +722,6 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
 .run-lineage { opacity: 0.6; margin-right: 2px; }
 .run-files { margin: 4px 0; padding-left: 18px; font-size: 12px; }
 .run-files code { word-break: break-all; }
+.avg-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted, inherit); }
+.avg-toggle select, .avg-toggle input { font-size: 11px; background: transparent; color: inherit; border: 1px solid var(--grid); border-radius: 4px; padding: 1px 3px; }
+.avg-toggle input { width: 56px; }

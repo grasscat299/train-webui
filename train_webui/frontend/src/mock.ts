@@ -1,6 +1,7 @@
 // VITE_MOCK=1 用のモック実装。backendなしで画面の状態遷移を一通り確認できるようにする。
 // api.ts の Api インターフェースを満たす（api.ts からは型のみをimportし、循環参照を避ける）。
 import type {
+  BinnedPlot,
   Api,
   Comparison,
   ProjectNode,
@@ -748,6 +749,29 @@ async function getPlots(runId: string, afterId?: number | null): Promise<Plot[]>
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+async function getBinnedPlot(runId: string, label: string, bin: string): Promise<BinnedPlot> {
+  const entry = plotsByRun.get(runId)?.get(label);
+  if (!entry) throw new Error('グラフが見つかりません');
+  const epoch = bin === 'epoch';
+  const width = epoch ? 100 : Number(bin);
+  if (!(width > 0)) throw new Error('bin は "epoch" か正の数にしてください');
+  const names = Array.from(new Set(entry.points.map((p) => p.series)));
+  const series = names.map((name) => {
+    const sums = new Map<number, [number, number]>();
+    entry.points.filter((p) => p.series === name).forEach((p) => {
+      const k = Math.floor(p.x / width);
+      const acc = sums.get(k) ?? [0, 0];
+      sums.set(k, [acc[0] + p.y, acc[1] + 1]);
+    });
+    const points = Array.from(sums.keys()).sort((a, b) => a - b).map((k) => {
+      const [s, n] = sums.get(k)!;
+      return [epoch ? k + 1 : (k + 1) * width, s / n] as [number, number];
+    });
+    return { name, points, total_points: entry.points.filter((p) => p.series === name).length };
+  });
+  return { label, bin, width, epoch, series };
+}
+
 async function updateComment(runId: string, comment: string): Promise<Run> {
   const run = getOrThrow(runId);
   run.comment = comment;
@@ -800,5 +824,6 @@ export const mockApi: Api = {
   getResults,
   getLabels,
   getPlots,
+  getBinnedPlot,
   putView: async () => {},
 };

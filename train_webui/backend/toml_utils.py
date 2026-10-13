@@ -114,3 +114,20 @@ def set_value(text: str, dotted_key: str, literal: str, add_missing: bool = Fals
     parse_toml(result)
     return result
 
+
+
+def find_number(text: str, key: str) -> float | None:
+    """config のどのセクションにあってもよいので、最初に見つかった数値のキー（例 steps_per_epoch）の値。無ければ None。"""
+    def find(d: dict) -> float | None:
+        v = d.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return float(v)
+        for sub in d.values():
+            if isinstance(sub, dict) and (found := find(sub)) is not None:
+                return found
+        return None
+
+    try:
+        return find(parse_toml(text))
+    except TomlValidationError:
+        return None
