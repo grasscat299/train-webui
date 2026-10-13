@@ -87,7 +87,7 @@ train_webui/
 
 | メソッド・パス | 内容 |
 |---|---|
-| `GET /api/tree` | `[{"project": str, "workspace": str, "groups": [{"group": str, "group_name": str, "runs": [RunSummary]}]}]`（`group` は group_id）。検出した全project（runが無いものも `groups: []` で含む）。projectはパス順、groupは group_name 順、runは `created_at` 新しい順 |
+| `GET /api/tree` | `[{"project": str, "workspace": str, "stage": str, "groups": [{"group": str, "group_name": str, "runs": [RunSummary]}]}]`（`group` は group_id）。検出した全project（runが無いものも `groups: []` で含む）。projectはパス順、groupは group_name 順、runは `created_at` 新しい順 |
 | `POST /api/rescan` | project検出をやり直す。`GET /api/tree` と同じ形を返す |
 | `GET /api/state` | `{"busy": bool, "active": {"run_id", "job_id" \| null, "kind", "origin"} \| null}`。GPU使用中か（webuiのjobが running、または cli の run が running） |
 | `POST /api/runs/draft` | body `{"project": str, "group": str \| null, "new_group": bool, "group_name": str \| null}`。§3（design.md）の規則で初期configを決めて draft を作る。既存groupへの追加では `group`（group_id）必須。`new_group=true` で `group` 省略なら group_id（`g<YYYYMMDD_HHMMSS>`）と group_name（`group_name` 省略時 `group1`, `group2`, ...）を自動で振り、`[wandb].group` を group_id に書き換える。返り値 Run |

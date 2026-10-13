@@ -26,7 +26,7 @@ from .ids import new_group_id, new_run_id
 from .jobs import JobBusyError, JobManager
 from .remote.types import RemoteControllerProtocol
 from .settings import Settings
-from .toml_utils import TomlValidationError, extract_group, set_value, set_wandb_group
+from .toml_utils import TomlValidationError, extract_group, extract_init_from, set_value, set_wandb_group
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
@@ -155,7 +155,7 @@ def _run_summary(row: dict, group_name: str | None = None) -> dict:
         "project": row["project"], "group": row["run_group"], "group_name": group_name or row["run_group"],
         "origin": row["origin"], "status": row["status"],
         "created_at": row["created_at"], "started_at": row["started_at"], "ended_at": row["ended_at"],
-        "comment": row["comment"] or "",
+        "comment": row["comment"] or "", "parent_run_id": row.get("parent_run_id"),
     }
 
 
@@ -398,7 +398,8 @@ def create_app(
         db.create_run(
             run_id=run_id, project=body.project, run_group=group,
             display_name=db.next_display_name(body.project, group), origin="webui", status="draft",
-            config_toml=config_toml, git_commit=None, git_diff=None, git_untracked=None,
+            config_toml=config_toml, parent_run_id=extract_init_from(config_toml),
+            git_commit=None, git_diff=None, git_untracked=None,
             git_info_source=None, created_at=now, started_at=None, ended_at=None,
             last_heartbeat_at=None, hostname=None, pid=None, exit_code=None, error=None,
         )
@@ -448,7 +449,8 @@ def create_app(
         except TomlValidationError as e:
             raise HTTPException(400, str(e)) from e
         db.ensure_group(run["project"], group)  # config で未登録の group_id に書き換えられたら、その group を作る
-        fields: dict = {"config_toml": body.config_toml, "run_group": group}
+        fields: dict = {"config_toml": body.config_toml, "run_group": group,
+                        "parent_run_id": extract_init_from(body.config_toml)}
         if group != run["run_group"]:  # 別groupに移ったら、そのgroupでの次の番号を振り直す
             fields["display_name"] = db.next_display_name(run["project"], group)
         db.update_run(run_id, **fields)
@@ -707,7 +709,7 @@ def create_app(
 
 
 def _build_tree(db: Database, projects: list[str]) -> list[dict]:
-    cats = categories.load_workspaces()  # 小さいファイルなので毎回読む（編集がすぐ反映される）
+    cats, cats_stages = categories.load_workspaces(), categories.load_stages()  # 小さいファイルなので毎回読む（編集がすぐ反映される）
     tree = []
     for project in projects:
         runs = db.list_runs_by_project(project)  # created_at 降順
@@ -719,5 +721,6 @@ def _build_tree(db: Database, projects: list[str]) -> list[dict]:
             {"group": g, "group_name": names.get(g, g), "runs": [_run_summary(r, names.get(g)) for r in groups[g]]}
             for g in sorted(groups, key=lambda g: names.get(g, g))
         ]
-        tree.append({"project": project, "workspace": categories.classify(project, cats), "groups": group_list})
+        tree.append({"project": project, "workspace": categories.classify(project, cats),
+                     "stage": categories.stage_of(project, cats_stages), "groups": group_list})
     return tree

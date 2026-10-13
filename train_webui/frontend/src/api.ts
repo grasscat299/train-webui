@@ -12,6 +12,7 @@ export interface RunSummary {
   project: string;
   group: string; // group_id（config の [wandb].group・checkpoint 名 model_{group_id}.pt に使う固定のID）
   group_name: string; // group の表示名（編集できる）
+  parent_run_id: string | null; // 引き継ぎ学習の元の run（config の init_from）。無ければ null
   comment: string; // run へのコメント（メモ）。いつでも編集できる
   origin: Origin;
   status: RunStatus;
@@ -117,6 +118,7 @@ export interface GroupNode {
 
 export interface ProjectNode {
   project: string;
+  stage: string; // 段階（本番 / scratch など。モデルのパスの先頭で決まる）
   workspace: string; // プロジェクト（categories.toml。無ければ「未分類」）
   groups: GroupNode[];
 }

@@ -128,3 +128,31 @@ def test_classify_by_glob():
     assert classify("src/world_model_v2", ws) == "ws"
     assert classify("other/x", ws) == "未分類"
     assert classify("x", []) == "未分類"
+
+
+def test_stage_of():
+    from train_webui.backend.categories import stage_of
+
+    st = {"src": "本番", "scratch": "scratch"}
+    assert stage_of("src/enemy_world_model", st) == "本番"
+    assert stage_of("scratch/DDPM", st) == "scratch"
+    assert stage_of("other/x", st) == "other"
+
+
+def test_extract_init_from():
+    from train_webui.backend.toml_utils import extract_init_from
+
+    assert extract_init_from('[train]\ninit_from = "20260101_000000"\n') == "20260101_000000"
+    assert extract_init_from('init_from = ""\n') is None
+    assert extract_init_from("[x]\na = 1\n") is None
+
+
+def test_parent_run_id_follows_config(app_factory):
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "proj_a")
+    client = TestClient(app)
+    run = client.post("/api/runs/draft", json={"project": "proj_a", "group": None, "new_group": True}).json()
+    assert run["parent_run_id"] is None
+    cfg = run["config_toml"] + '\ninit_from = "20260101_000000"\n'
+    updated = client.put(f"/api/runs/{run['run_id']}/config", json={"config_toml": cfg}).json()
+    assert updated["parent_run_id"] == "20260101_000000"

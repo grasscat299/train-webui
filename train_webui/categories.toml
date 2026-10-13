@@ -5,3 +5,8 @@
 [[project]]
 name  = "td_plan"
 match = ["src/*", "scratch/*"]
+
+# 段階（プロジェクトの下の2段目）。モデルのパスの先頭の要素で決まる。未登録ならその要素名がそのまま出る。
+[stages]
+src     = "本番"
+scratch = "scratch"

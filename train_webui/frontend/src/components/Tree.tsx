@@ -29,8 +29,12 @@ export function Tree(props: TreeProps) {
       {props.tree.length === 0 && <div className="tree-empty">projectが見つかりません</div>}
       {groupByWorkspace(props.tree).map((ws) => (
         <HeaderRow key={ws.name} label={ws.name} storeKey={`treeOpen.ws.${ws.name}`} className="tree-workspace-row">
-          {ws.models.map((p) => (
-            <ProjectRow key={p.project} node={p} {...props} />
+          {ws.stages.map((st) => (
+            <HeaderRow key={st.name} label={st.name} storeKey={`treeOpen.stage.${ws.name}\u0000${st.name}`} className="tree-stage-row">
+              {st.models.map((p) => (
+                <ProjectRow key={p.project} node={p} {...props} />
+              ))}
+            </HeaderRow>
           ))}
         </HeaderRow>
       ))}
@@ -38,16 +42,31 @@ export function Tree(props: TreeProps) {
   );
 }
 
-// プロジェクト > モデル（ProjectNode。モデルのパスがそのままカテゴリーとして出る）の順に、tree の出現順を保ってまとめる
+// プロジェクト > 段階（本番/scratch）> ディレクトリ（ProjectNode）の順に、tree の出現順を保ってまとめる
 function groupByWorkspace(tree: ProjectNode[]) {
-  const result: { name: string; models: ProjectNode[] }[] = [];
+  const result: { name: string; stages: { name: string; models: ProjectNode[] }[] }[] = [];
   for (const p of tree) {
     const wsName = p.workspace ?? '未分類';
+    const stName = p.stage ?? '';
     let ws = result.find((w) => w.name === wsName);
-    if (!ws) result.push((ws = { name: wsName, models: [] }));
-    ws.models.push(p);
+    if (!ws) result.push((ws = { name: wsName, stages: [] }));
+    let st = ws.stages.find((x) => x.name === stName);
+    if (!st) ws.stages.push((st = { name: stName, models: [] }));
+    st.models.push(p);
   }
   return result;
+}
+
+// group 内の run を、引き継ぎ学習の親子（parent_run_id）の木にする。親が group に無い run は根に置く
+interface RunTree { run: RunSummary; children: RunTree[] }
+function buildRunTree(runs: RunSummary[]): RunTree[] {
+  const nodes = new Map<string, RunTree>(runs.map((r) => [r.run_id, { run: r, children: [] }]));
+  const roots: RunTree[] = [];
+  for (const r of runs) {
+    const parent = r.parent_run_id && r.parent_run_id !== r.run_id ? nodes.get(r.parent_run_id) : undefined;
+    (parent ? parent.children : roots).push(nodes.get(r.run_id)!);
+  }
+  return roots;
 }
 
 function HeaderRow({ label, storeKey, className, children }: {
@@ -139,6 +158,29 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
     setCopiedId(runId);
     window.setTimeout(() => setCopiedId((cur) => (cur === runId ? null : cur)), 1200);
   };
+  const renderRun = ({ run: r, children }: RunTree, depth: number): React.ReactNode => (
+    <div key={r.run_id}>
+      <div className={`tree-row tree-run-row ${selectedRunId === r.run_id ? 'selected' : ''}`} style={{ paddingLeft: depth * 14 }}>
+        {mode === 'result' && (
+          <EyeToggle on={isRunChecked(r.run_id)} onChange={(on) => toggleRun(r.run_id, on)} />
+        )}
+        <button className="tree-run-btn" onClick={() => onSelectRun(r.run_id)}>
+          {depth > 0 && <span className="run-lineage" title="引き継ぎ学習">↳</span>}
+          <span className={`status-dot status-${r.status}`} title={r.status} />
+          <span className="run-name" title={r.run_id}>
+            {r.display_name}
+          </span>
+          {r.origin === 'cli' && <span className="cli-badge">CLI</span>}
+        </button>
+        <span className={`row-actions${copiedId === r.run_id ? ' shown' : ''}`}>
+          <IconButton title="run_id をコピー（Claude に貼ると、この run を読める）" onClick={() => copyRunId(r.run_id)}>
+            {copiedId === r.run_id ? <CheckIcon /> : <CopyIcon />}
+          </IconButton>
+        </span>
+      </div>
+      {children.map((c) => renderRun(c, depth + 1))}
+    </div>
+  );
   return (
     <div className="tree-group">
       <div className="tree-row tree-group-row">
@@ -169,25 +211,7 @@ function GroupRow({ project, node, mode, busy, selectedRunId, onSelectRun, onNew
       </div>
       {open && (
         <div className="tree-children">
-          {node.runs.map((r) => (
-            <div key={r.run_id} className={`tree-row tree-run-row ${selectedRunId === r.run_id ? 'selected' : ''}`}>
-              {mode === 'result' && (
-                <EyeToggle on={isRunChecked(r.run_id)} onChange={(on) => toggleRun(r.run_id, on)} />
-              )}
-              <button className="tree-run-btn" onClick={() => onSelectRun(r.run_id)}>
-                <span className={`status-dot status-${r.status}`} title={r.status} />
-                <span className="run-name" title={r.run_id}>
-                  {r.display_name}
-                </span>
-                {r.origin === 'cli' && <span className="cli-badge">CLI</span>}
-              </button>
-              <span className={`row-actions${copiedId === r.run_id ? ' shown' : ''}`}>
-                <IconButton title="run_id をコピー（Claude に貼ると、この run を読める）" onClick={() => copyRunId(r.run_id)}>
-                  {copiedId === r.run_id ? <CheckIcon /> : <CopyIcon />}
-                </IconButton>
-              </span>
-            </div>
-          ))}
+          {buildRunTree(node.runs).map((t) => renderRun(t, 0))}
         </div>
       )}
     </div>

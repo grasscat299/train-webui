@@ -122,13 +122,17 @@ WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマ�
 - **project の識別子はリポジトリ直下からのディレクトリパス**（例: `src/world_model_v1`）。
   `[wandb].project` の値は表示にもキーにも使わない（ツリーの並びと一致させるため）。
 
-## 2.5 プロジェクト > モデル（表示上の分類）
+## 2.5 プロジェクト > 段階 > ディレクトリ > group > run（表示上の分類）
 
-- 画面のツリーは `プロジェクト > モデル（§2 の project。`src/enemy_world_model` などのパスがそのままカテゴリー）
-  > group > run` の順。groupまでを常に表示し、group内のrunは初期状態では畳む（groupの矢印で開閉）。
-- 最上段のプロジェクトは `train_webui/categories.toml`（git管理）で決める。モデルのパスを `match` の glob に当て、
-  上から順に最初に合致したプロジェクトに入れる。どれにも合致しなければ「未分類」。
-- DB・CLIの引数は従来のまま。`/api/tree` の各要素に `workspace` が足されるだけ。`cli ls` は `[プロジェクト]` の見出しを出す。
+- 画面のツリーは `プロジェクト > 段階（本番 / scratch）> ディレクトリ（§2 の project。`src/enemy_world_model` など）
+  > group（モデル。ハイパラ構成）> run` の順。groupまでを常に表示し、group内のrunは初期状態では畳む。
+- **引き継ぎ学習**: config の `init_from = "<元の run_id>"`（どのセクションでも可）を `runs.parent_run_id` に保存し、
+  ツリーでは元の run の下に `↳` で出す（親が同じ group に無ければ根に出る）。config の編集・下書き作成のたびに更新する。
+- プロジェクト・段階・ディレクトリはパスから毎回計算し、DBには保存しない（移動・改名でずれないように）。
+  `train_webui/categories.toml`（git管理）の `[[project]] match`（glob）でプロジェクトを、`[stages]`
+  （パスの先頭の要素 → 段階名）で段階を決める。合致しなければ「未分類」・先頭の要素名。
+- DB・CLIの引数は従来のまま。`/api/tree` の各要素に `workspace`・`stage`、各 run に `parent_run_id` が足される。
+  `cli ls` は `[プロジェクト > 段階]` の見出しを出す。
 
 ## 3. config は run に1つ紐づく（config.tomlは「今開いている下書き」でしかない）
 

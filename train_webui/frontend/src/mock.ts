@@ -100,8 +100,8 @@ function nextDisplayName(project: string, group: string): string {
   return `v${Math.max(0, ...used) + 1}`;
 }
 
-function makeRun(fields: Omit<StoredRun, 'display_name' | 'comment'>): StoredRun {
-  const run: StoredRun = { ...fields, display_name: nextDisplayName(fields.project, fields.group), comment: '' };
+function makeRun(fields: Omit<StoredRun, 'display_name' | 'comment' | 'parent_run_id'>): StoredRun {
+  const run: StoredRun = { ...fields, display_name: nextDisplayName(fields.project, fields.group), comment: '', parent_run_id: null };
   runs.set(run.run_id, run);
   if (!jobsByRun.has(run.run_id)) jobsByRun.set(run.run_id, []);
   if (!resultsByRun.has(run.run_id)) resultsByRun.set(run.run_id, []);
@@ -196,6 +196,7 @@ function toSummary(run: StoredRun): RunSummary {
     run_id: run.run_id,
     display_name: run.display_name,
     comment: run.comment,
+    parent_run_id: null,
     project: run.project,
     group: run.group,
     group_name: groupNameOf(run.project, run.group),
@@ -244,7 +245,7 @@ function buildTree(): ProjectNode[] {
           group_name: groupNameOf(project, g),
           runs: groupMap.get(g)!.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)),
         }));
-      return { project, workspace: 'td_plan', groups };
+      return { project, workspace: 'td_plan', stage: project.split('/')[0] === 'src' ? '本番' : 'scratch', groups };
     });
 }
 

@@ -158,6 +158,8 @@ class Database:
                 conn.execute("ALTER TABLE runs ADD COLUMN display_name TEXT")
             if "comment" not in cols:  # run へのコメント（メモ）。追加前のDBは空文字で移行
                 conn.execute("ALTER TABLE runs ADD COLUMN comment TEXT NOT NULL DEFAULT ''")
+            if "parent_run_id" not in cols:  # 引き継ぎ学習の元になった run（config の init_from）。追加前のDBは NULL
+                conn.execute("ALTER TABLE runs ADD COLUMN parent_run_id TEXT")
             rows = conn.execute(
                 "SELECT run_id, project, run_group FROM runs WHERE display_name IS NULL "
                 "ORDER BY created_at ASC, run_id ASC"
