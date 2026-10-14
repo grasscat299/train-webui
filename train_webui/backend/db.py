@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS plot_points (
 );
 
 CREATE INDEX IF NOT EXISTS idx_plot_points_run_label ON plot_points(run_id, label, id);
+CREATE INDEX IF NOT EXISTS idx_plot_points_run_label_series ON plot_points(run_id, label, series, id);
 
 -- Result タブで名前を付けて残した比較（比較する run と、表示中・非表示のラベル。いずれも JSON の配列）
 CREATE TABLE IF NOT EXISTS comparisons (
@@ -471,7 +472,8 @@ class Database:
             cur = conn.execute(sql, [fields[c] for c in cols])
             return int(cur.lastrowid)
 
-    def list_results(self, run_id: str, kind: str | None = None, label: str | None = None) -> list[dict]:
+    def list_results(self, run_id: str, kind: str | None = None, label: str | None = None,
+                     after_id: int | None = None, exclude_labels: Iterable[str] = ()) -> list[dict]:
         query = "SELECT * FROM results WHERE run_id = ?"
         params: list[Any] = [run_id]
         if kind is not None:
@@ -480,10 +482,40 @@ class Database:
         if label is not None:
             query += " AND label = ?"
             params.append(label)
+        if after_id is not None:
+            query += " AND id > ?"
+            params.append(after_id)
+        exclude = list(exclude_labels)
+        if exclude:
+            query += f" AND label NOT IN ({', '.join('?' for _ in exclude)})"
+            params.extend(exclude)
         query += " ORDER BY sent_at ASC, id ASC"
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
+
+    def metric_label_counts(self, run_id: str) -> dict[str, int]:
+        """run の metric の label ごとの件数。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT label, COUNT(*) AS n FROM results WHERE run_id = ? AND kind = 'metric' GROUP BY label",
+                (run_id,),
+            ).fetchall()
+        return {r["label"]: r["n"] for r in rows}
+
+    def results_fingerprint(self, run_id: str) -> str:
+        """results の変化を見るための値（ETag 用）。結果は追記だけなので件数と最大 id でよい。"""
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n, MAX(id) AS m FROM results WHERE run_id = ?", (run_id,)).fetchone()
+        return f"{row['n']}-{row['m']}"
+
+    def plots_fingerprint(self, run_id: str) -> str:
+        """plots（定義）の変化を見るための値（ETag 用）。点の変化は max_plot_point_id で見る。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n, MAX(updated_at) AS u FROM plots WHERE run_id = ?", (run_id,),
+            ).fetchone()
+        return f"{row['n']}-{row['u']}"
 
     def update_result(self, result_id: int, **fields: Any) -> None:
         if not fields:

@@ -43,10 +43,13 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
   const [yOverride, setYOverride] = useState<AxisScale | null>(null);
   // 平均表示（line だけ）。none=そのまま / epoch=config の steps_per_epoch ごと / width=x の幅ごと
   // 横軸が step の line（train/loss など）は、最初から epoch ごとの平均にする。epoch/loss や推論時の曲線など、
-  // 横軸が step でないものは平均しない（意味が変わるため）。config に steps_per_epoch が無ければ、そのまま表示して理由を出す
-  const [avgMode, setAvgMode] = useState<'none' | 'epoch' | 'width'>(() =>
-    entries[0]?.plot.kind === 'line' && /^step/i.test(entries[0].plot.xlabel.trim()) ? 'epoch' : 'none',
-  );
+  // 横軸が step でないものは平均しない（意味が変わるため）。config に steps_per_epoch が無ければ、そのまま表示して理由を出す。
+  // 画面で選んだ値は avgChoice に持ち、選んでいなければ（null）その時点の plot から決める（最初に空のグラフで描かれても標準が効くように）
+  const first = entries[0]?.plot;
+  const defaultAvg = first?.kind === 'line' && /^step/i.test(first.xlabel.trim()) ? 'epoch' : 'none';
+  const [avgChoice, setAvgChoice] = useState<'none' | 'epoch' | 'width' | null>(null);
+  const avgMode = avgChoice ?? defaultAvg;
+  const setAvgMode = setAvgChoice;
   const [avgWidth, setAvgWidth] = useState('100');
   const label = entries[0]?.plot.label ?? '';
   const bin = avgMode === 'epoch' ? 'epoch' : avgWidth;
@@ -90,6 +93,35 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
     };
   }, [averaging, runKey, label, bin]);
 
+  // 横軸が step の line は、一覧の取得では点を省いてある（omitted）。平均しない時（なし・平均を出せない時）だけ、生の点（間引き済み）を取りに行く
+  const needRaw = (!averaging || binError !== null) && entries.some((e) => e.plot.omitted);
+  const [raw, setRaw] = useState<Record<string, Plot>>({});
+  useEffect(() => {
+    if (!needRaw) {
+      setRaw({});
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const got = await Promise.all(
+          runKey.split(',').map(async (id) => [id, (await api.getPlots(id, null, { label }))[0]] as const),
+        );
+        if (!cancelled) setRaw(Object.fromEntries(got.filter(([, p]) => p !== undefined)));
+      } catch {
+        // 次の周期でまた試す
+      } finally {
+        if (!cancelled) timer = window.setTimeout(load, 3000);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [needRaw, runKey, label]);
+
   if (entries.length === 0) return <div className="no-image">データなし</div>;
 
   // 軸の定義は updated_at が最新のものを使う
@@ -103,7 +135,7 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
   const notes: string[] = [];
   const binnedActive = averaging && Object.keys(binned).length > 0;
   const lines = entries.flatMap((e) =>
-    (binnedActive ? binned[e.runId]?.series ?? [] : e.plot.series).map((s) => {
+    (binnedActive ? binned[e.runId]?.series ?? [] : e.plot.omitted ? raw[e.runId]?.series ?? [] : e.plot.series).map((s) => {
       const visible = s.points.filter(
         ([x, y]) => !(xscale === 'log' && x <= 0) && !(yscale === 'log' && y <= 0),
       );

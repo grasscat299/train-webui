@@ -6,6 +6,7 @@ import binascii
 import json
 import ipaddress
 import math
+import re
 import shutil
 import threading
 import time
@@ -196,6 +197,20 @@ def _run_detail(db: Database, row: dict) -> dict:
     return detail
 
 
+def _json_with_etag(request: Request, etag: str, build) -> Response:
+    """内容が変わっていなければ（If-None-Match が一致）本文なしの 304 を返す。変わっていれば build() の結果を JSON で返す。"""
+    tag = f'"{etag}"'
+    headers = {"ETag": tag, "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == tag:
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(build(), headers=headers)
+
+
+def _is_step_line(row: dict) -> bool:
+    """横軸が step の line（train/loss など）。画面では標準で epoch 平均で表示するので、生の点は要らないことが多い。"""
+    return row["kind"] == "line" and re.match(r"step", (row["xlabel"] or "").strip(), re.I) is not None
+
+
 def _result_public(row: dict) -> dict:
     base = {
         "id": row["id"], "run_id": row["run_id"], "kind": row["kind"], "label": row["label"],
@@ -210,16 +225,21 @@ def _result_public(row: dict) -> dict:
     return base
 
 
-def _plot_public(db: Database, row: dict, after_id: int | None, max_points: int, upto: int) -> dict:
+def _plot_public(db: Database, row: dict, after_id: int | None, max_points: int, upto: int,
+                 omit_step_lines: bool = False) -> dict:
     """CONTRACT.md §2.1 の Plot。max_points を超える系列は間引き済みの全体を返す（§4）。
 
     upto（リクエスト開始時点の最大の点id）以下の点だけを扱う。読んでいる途中に追加された点を
     last_point_id に含めてしまうと、次回の after_id による差分取得でその点が漏れるため。
     """
     run_id, label = row["run_id"], row["label"]
+    omitted = omit_step_lines and _is_step_line(row)
     series = []
     for stat in db.list_plot_series_stats(run_id, label, upto):
         total = stat["total"]
+        if omitted:
+            series.append({"name": stat["series"], "points": [], "total_points": total, "downsampled": False})
+            continue
         if total > max_points:
             pts = db.list_plot_points(run_id, label, stat["series"], upto)
             decimate = decimate_minmax if row["kind"] == "line" else decimate_stride
@@ -241,7 +261,7 @@ def _plot_public(db: Database, row: dict, after_id: int | None, max_points: int,
         "title": row["title"], "xlabel": row["xlabel"], "ylabel": row["ylabel"],
         "xscale": row["xscale"], "yscale": row["yscale"],
         "xlim": lim(row["xmin"], row["xmax"]), "ylim": lim(row["ymin"], row["ymax"]),
-        "updated_at": row["updated_at"], "series": series,
+        "updated_at": row["updated_at"], "series": series, "omitted": omitted,
         "last_point_id": db.max_plot_point_id(run_id, label, upto=upto),
     }
 
@@ -644,23 +664,52 @@ def create_app(
         return {"data": text, "offset": new_offset, "done": job["status"] != "running"}
 
     @app.get("/api/runs/{run_id}/results")
-    def get_results(run_id: str, kind: str | None = None, label: str | None = None) -> list[dict]:
+    def get_results(request: Request, run_id: str, kind: str | None = None, label: str | None = None,
+                    after_id: int | None = None, max_points: int | None = Query(None, ge=4)) -> Response:
+        """run の結果。after_id を渡すと、それより後の id の結果だけ返す（差分取得）。
+
+        max_points を渡すと、件数がそれを超える metric の label は、間引き済みの全体を返す
+        （差分ではない。該当の結果には downsampled=true を付ける）。
+        """
         run = db.get_run(run_id)
         if run is None:
             raise HTTPException(404, "run が見つかりません")
-        return [_result_public(r) for r in db.list_results(run_id, kind=kind, label=label)]
+
+        def build() -> list[dict]:
+            big: set[str] = set()
+            if max_points is not None and kind in (None, "metric"):
+                big = {l for l, n in db.metric_label_counts(run_id).items()
+                       if n > max_points and (label is None or l == label)}
+            rows = [_result_public(r) for r in db.list_results(
+                run_id, kind=kind, label=label, after_id=after_id, exclude_labels=big)]
+            for big_label in sorted(big):
+                all_rows = db.list_results(run_id, kind="metric", label=big_label)
+                keep = decimate_minmax([(i, 0.0, r["value"]) for i, r in enumerate(all_rows)], max_points)
+                rows.extend({**_result_public(all_rows[i]), "downsampled": True} for i, _x, _y in keep)
+            rows.sort(key=lambda r: (r["sent_at"], r["id"]))
+            return rows
+
+        etag = f"r-{db.results_fingerprint(run_id)}-{request.url.query}"
+        return _json_with_etag(request, etag, build)
 
     @app.get("/api/runs/{run_id}/plots")
-    def get_plots(run_id: str, label: str | None = None, after_id: int | None = None,
-                  max_points: int = Query(1000, ge=4)) -> list[dict]:
+    def get_plots(request: Request, run_id: str, label: str | None = None, after_id: int | None = None,
+                  max_points: int = Query(1000, ge=4), omit_step_lines: bool = False) -> Response:
+        """omit_step_lines=true なら、横軸が step の line は点を返さない（omitted=true）。平均表示用に別途 binned で取る。"""
         run = db.get_run(run_id)
         if run is None:
             raise HTTPException(404, "run が見つかりません")
         upto = db.max_plot_point_id(run_id) or 0
-        return [_plot_public(db, row, after_id, max_points, upto) for row in db.list_plots(run_id, label=label)]
+
+        def build() -> list[dict]:
+            return [_plot_public(db, row, after_id, max_points, upto, omit_step_lines)
+                    for row in db.list_plots(run_id, label=label)]
+
+        etag = f"p-{upto}-{db.plots_fingerprint(run_id)}-{request.url.query}"
+        return _json_with_etag(request, etag, build)
 
     @app.get("/api/runs/{run_id}/plots/binned")
-    def get_binned_plot(run_id: str, label: str, bin: str = "epoch") -> dict:
+    def get_binned_plot(request: Request, run_id: str, label: str, bin: str = "epoch") -> Response:
         """line のグラフを、x を一定の幅ごとに平均して返す（全点から作る。間引かない）。
 
         bin="epoch": その run の config の steps_per_epoch を幅にし、x は epoch 番号（1始まり）にする。
@@ -688,13 +737,18 @@ def create_app(
                 raise HTTPException(400, "bin は \"epoch\" か正の数にしてください")
             to_x = lambda k: (k + 1) * width  # noqa: E731 - 区間の終わり
         upto = db.max_plot_point_id(run_id) or 0
-        series = []
-        for stat in db.list_plot_series_stats(run_id, label, upto):
-            pts = db.list_plot_points(run_id, label, stat["series"], upto)
-            bins = binning.bin_mean(pts, width)
-            series.append({"name": stat["series"], "points": [[to_x(k), mean] for k, mean, _n in bins],
-                           "total_points": stat["total"]})
-        return {"label": label, "bin": bin, "width": width, "epoch": bin == "epoch", "series": series}
+
+        def build() -> dict:
+            series = []
+            for stat in db.list_plot_series_stats(run_id, label, upto):
+                pts = db.list_plot_points(run_id, label, stat["series"], upto)
+                bins = binning.bin_mean(pts, width)
+                series.append({"name": stat["series"], "points": [[to_x(k), mean] for k, mean, _n in bins],
+                               "total_points": stat["total"]})
+            return {"label": label, "bin": bin, "width": width, "epoch": bin == "epoch", "series": series}
+
+        # 点は追記だけで、width は config（draft 以外は変わらない）から決まるので、upto と query が同じなら結果も同じ
+        return _json_with_etag(request, f"b-{upto}-{request.url.query}", build)
 
     @app.get("/api/labels")
     def get_labels(run_ids: str = "") -> list[dict]:

@@ -1,6 +1,6 @@
 import { GroupDescription } from './GroupDescription';
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../api';
+import { RESULT_MAX_POINTS, api, lastResultId, mergeResults } from '../api';
 import { waitUntilVisible } from '../hooks/visibility';
 import type { ImageResult, MetricResult, Plot, Result, Run } from '../api';
 import { LogView } from './LogView';
@@ -29,6 +29,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
   const [plots, setPlots] = useState<Plot[]>([]);
   // 軸つきグラフの差分取得用（ポーリング中に最新を参照するため ref に持つ）
   const plotsRef = useRef<Plot[] | undefined>(undefined);
+  const resultsRef = useRef<Result[] | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [configDraft, setConfigDraft] = useState('');
@@ -38,6 +39,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
 
   useEffect(() => {
     plotsRef.current = undefined;
+    resultsRef.current = undefined;
     setPlots([]);
     if (!runId) {
       setRun(null);
@@ -54,12 +56,16 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
         if (cancelled) return;
         setRun(r);
         setLoadError(null);
-        const rs = await api.getResults(runId);
+        const prevRs = resultsRef.current;
+        const rs = mergeResults(
+          prevRs, await api.getResults(runId, undefined, undefined, { afterId: lastResultId(prevRs), maxPoints: RESULT_MAX_POINTS }),
+        );
         if (cancelled) return;
+        resultsRef.current = rs;
         setResults(rs);
         const prev = plotsRef.current;
         const ids = (prev ?? []).map((p) => p.last_point_id).filter((v): v is number => v !== null);
-        const nextPlots = mergePlots(prev, await api.getPlots(runId, prev && ids.length > 0 ? Math.max(...ids) : null));
+        const nextPlots = mergePlots(prev, await api.getPlots(runId, prev && ids.length > 0 ? Math.max(...ids) : null, { omitStepLines: true }));
         if (cancelled) return;
         plotsRef.current = nextPlots;
         setPlots(nextPlots);

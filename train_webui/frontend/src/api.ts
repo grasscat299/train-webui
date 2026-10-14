@@ -67,6 +67,7 @@ export interface MetricResult {
   value: number;
   source: string;
   sent_at: string;
+  downsampled?: boolean; // true の label は、同じ label の結果が間引き済みの全体として返っている（差分ではない）
 }
 
 export interface ImageResult {
@@ -95,6 +96,20 @@ export interface TableResult {
 
 export type Result = MetricResult | ImageResult | TableResult;
 
+// 差分で取得した結果を手元の結果に反映する。downsampled の label は置き換え、それ以外は追記する。
+export function mergeResults(prev: Result[] | undefined, next: Result[]): Result[] {
+  const replaced = new Set(next.filter((r) => r.kind === 'metric' && r.downsampled).map((r) => r.label));
+  return [...(prev ?? []).filter((r) => !replaced.has(r.label)), ...next];
+}
+
+// 次の差分取得の起点（手元の結果の最大 id）。まだ何も無ければ null（全部取る）
+export function lastResultId(results: Result[] | undefined): number | null {
+  return results && results.length > 0 ? Math.max(...results.map((r) => r.id)) : null;
+}
+
+// 画面に出す点数の上限（metric の間引き用）
+export const RESULT_MAX_POINTS = 1000;
+
 // 軸つきグラフ（design.md §5.3）。downsampled=true の系列は points が間引き済みの全体（差分ではない）。
 export interface PlotSeries {
   name: string;
@@ -117,6 +132,7 @@ export interface Plot {
   ylim: [number, number] | null;
   updated_at: string;
   series: PlotSeries[];
+  omitted?: boolean; // true なら points は空（横軸が step の line。平均表示は binned、生の点は getPlots の label 指定で取る）
   last_point_id: number | null;
 }
 
@@ -207,9 +223,14 @@ export interface Api {
   // その run の重みで推論する（重みが登録された、学習の終わった run だけ）
   runInfer(project: string, runId: string): Promise<Job>;
   getJobLog(jobId: string, offset: number): Promise<JobLogResp>;
-  getResults(runId: string, kind?: 'metric' | 'image' | 'table', label?: string): Promise<Result[]>;
+  // afterId を渡すと、それより後の結果だけ返す（差分）。maxPoints を渡すと、それを超える metric は間引き済みの全体を返す
+  getResults(
+    runId: string, kind?: 'metric' | 'image' | 'table', label?: string,
+    opts?: { afterId?: number | null; maxPoints?: number },
+  ): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
-  getPlots(runId: string, afterId?: number | null): Promise<Plot[]>;
+  // omitStepLines: 横軸が step の line は点を返さない。label: そのグラフだけ取る
+  getPlots(runId: string, afterId?: number | null, opts?: { omitStepLines?: boolean; label?: string }): Promise<Plot[]>;
   // line のグラフを x の幅ごとに平均して取る。bin は "epoch"（config の steps_per_epoch）か幅の数値
   getBinnedPlot(runId: string, label: string, bin: string): Promise<BinnedPlot>;
   // 画面で今見ている構成を server に送る（Claude が `cli view` で読む）
@@ -293,19 +314,25 @@ const realApi: Api = {
     }),
   getJobLog: (jobId, offset) =>
     request<JobLogResp>(`/api/jobs/${encodeURIComponent(jobId)}/log?offset=${offset}`),
-  getResults: (runId, kind, label) => {
+  getResults: (runId, kind, label, opts) => {
     const params = new URLSearchParams();
     if (kind) params.set('kind', kind);
     if (label) params.set('label', label);
+    if (opts?.afterId != null) params.set('after_id', String(opts.afterId));
+    if (opts?.maxPoints != null) params.set('max_points', String(opts.maxPoints));
     const qs = params.toString();
     return request<Result[]>(`/api/runs/${encodeURIComponent(runId)}/results${qs ? `?${qs}` : ''}`);
   },
   getLabels: (runIds) =>
     request<LabelInfo[]>(`/api/labels?run_ids=${encodeURIComponent(runIds.join(','))}`),
-  getPlots: (runId, afterId) =>
-    request<Plot[]>(
-      `/api/runs/${encodeURIComponent(runId)}/plots${afterId != null ? `?after_id=${afterId}` : ''}`,
-    ),
+  getPlots: (runId, afterId, opts) => {
+    const params = new URLSearchParams();
+    if (afterId != null) params.set('after_id', String(afterId));
+    if (opts?.omitStepLines) params.set('omit_step_lines', 'true');
+    if (opts?.label) params.set('label', opts.label);
+    const qs = params.toString();
+    return request<Plot[]>(`/api/runs/${encodeURIComponent(runId)}/plots${qs ? `?${qs}` : ''}`);
+  },
   getBinnedPlot: (runId, label, bin) =>
     request<BinnedPlot>(
       `/api/runs/${encodeURIComponent(runId)}/plots/binned?label=${encodeURIComponent(label)}&bin=${encodeURIComponent(bin)}`,

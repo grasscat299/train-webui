@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { api } from '../api';
+import { RESULT_MAX_POINTS, api, lastResultId, mergeResults } from '../api';
 import { waitUntilVisible } from '../hooks/visibility';
 import type { ImageResult, LabelInfo, MetricResult, Plot, ProjectNode, Result } from '../api';
 import { MetricChart } from './MetricChart';
@@ -36,6 +36,7 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
   const [plotsByRun, setPlotsByRun] = useState<Record<string, Plot[]>>({});
   // 差分取得用: runごとの手元の Plot（ポーリング中に最新を参照するため ref に持つ）
   const plotsRef = useRef<Record<string, Plot[]>>({});
+  const resultsRef = useRef<Record<string, Result[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -59,6 +60,7 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
   useEffect(() => {
     // 比較対象runが変わったら軸つきグラフは取り直す
     plotsRef.current = {};
+    resultsRef.current = {};
     setPlotsByRun({});
     lastFetchedRef.current = {};
     wasLiveRef.current = {};
@@ -93,8 +95,13 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
           });
           return next;
         });
-        const entries = await Promise.all(due.map(async (id) => [id, await api.getResults(id)] as const));
+        const entries = await Promise.all(due.map(async (id) => {
+          const prevRs = resultsRef.current[id];
+          const got = await api.getResults(id, undefined, undefined, { afterId: lastResultId(prevRs), maxPoints: RESULT_MAX_POINTS });
+          return [id, mergeResults(prevRs, got)] as const;
+        }));
         if (cancelled) return;
+        resultsRef.current = { ...resultsRef.current, ...Object.fromEntries(entries) };
         setResultsByRun((prev) => {
           // 比較から外れた run の分は捨て、今回取った run の分だけ置き換える
           const next: Record<string, Result[]> = {};
@@ -108,7 +115,7 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
           // 点のidはrun内で通し番号なので、全ラベルの最大の last_point_id 以降を取れば差分になる
           const ids = (prev ?? []).map((p) => p.last_point_id).filter((v): v is number => v !== null);
           const afterId = prev && ids.length > 0 ? Math.max(...ids) : null;
-          return [id, mergePlots(prev, await api.getPlots(id, afterId))] as const;
+          return [id, mergePlots(prev, await api.getPlots(id, afterId, { omitStepLines: true }))] as const;
         }));
         if (cancelled) return;
         plotsRef.current = { ...plotsRef.current, ...Object.fromEntries(plotEntries) };

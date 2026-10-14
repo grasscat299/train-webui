@@ -706,10 +706,12 @@ async function getJobLog(jobId: string, offset: number): Promise<JobLogResp> {
   return { data, offset: full.length, done };
 }
 
-async function getResults(runId: string, kind?: 'metric' | 'image', label?: string): Promise<Result[]> {
+async function getResults(
+  runId: string, kind?: 'metric' | 'image' | 'table', label?: string, opts?: { afterId?: number | null },
+): Promise<Result[]> {
   const list = resultsByRun.get(runId) ?? [];
   return list
-    .filter((r) => (!kind || r.kind === kind) && (!label || r.label === label))
+    .filter((r) => (!kind || r.kind === kind) && (!label || r.label === label) && (opts?.afterId == null || r.id > opts.afterId))
     .slice()
     .sort((a, b) => a.sent_at.localeCompare(b.sent_at));
 }
@@ -730,10 +732,13 @@ async function getLabels(runIds: string[]): Promise<LabelInfo[]> {
 }
 
 // backend と同じく、上限を超えた系列は間引き済みの全体を返す（モックでは等間隔に間引くだけ）
-async function getPlots(runId: string, afterId?: number | null): Promise<Plot[]> {
+async function getPlots(
+  runId: string, afterId?: number | null, opts?: { omitStepLines?: boolean; label?: string },
+): Promise<Plot[]> {
   const byLabel = plotsByRun.get(runId);
   if (!byLabel) return [];
   return Array.from(byLabel.values())
+    .filter(({ def }) => !opts?.label || def.label === opts.label)
     .map(({ def, points }) => {
       const names = Array.from(new Set(points.map((p) => p.series)));
       const series = names.map((name) => {
