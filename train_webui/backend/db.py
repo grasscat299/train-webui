@@ -471,6 +471,15 @@ class Database:
             cur = conn.execute(sql, [fields[c] for c in cols])
             return int(cur.lastrowid)
 
+    def create_metric_results(self, run_id: str, source: str, rows: list[tuple]) -> None:
+        """metric をまとめて1トランザクションで入れる。rows = (label, step, value, sent_at)。"""
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO results (run_id, kind, label, step, value, image_path, source, sent_at) "
+                "VALUES (?, 'metric', ?, ?, ?, NULL, ?, ?)",
+                [(run_id, label, step, value, source, sent_at) for label, step, value, sent_at in rows],
+            )
+
     def list_results(self, run_id: str, kind: str | None = None, label: str | None = None) -> list[dict]:
         query = "SELECT * FROM results WHERE run_id = ?"
         params: list[Any] = [run_id]
