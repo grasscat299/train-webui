@@ -825,9 +825,27 @@ def create_app(
         run = db.get_run(body.run_id)
         if run is None:
             raise HTTPException(404, "run が見つかりません")
+        # 学習は1秒に何百件も送るので、metric は溜めて1トランザクションで入れ、ラベルの検査も組ごとに1回だけにする
+        # （1件ずつ接続・commit していた頃は秒30件ほどしか捌けず、送信が学習に追いつかなかった）
+        checked: set[tuple[str, bool, str]] = set()
+        pending_metrics: list[tuple] = []
+
+        def flush_metrics() -> None:
+            if pending_metrics:
+                db.create_metric_results(body.run_id, body.source, pending_metrics)
+                pending_metrics.clear()
+
         for item in body.items:
             is_plot = item.kind in ("plot_def", "plot_points")
-            _check_label_kind(db, body.run_id, item.label, is_plot, item.kind)
+            key = (item.label, is_plot, item.kind)
+            if key not in checked:
+                flush_metrics()  # 検査は DB を見るので、溜めた分を先に入れてから
+                _check_label_kind(db, body.run_id, item.label, is_plot, item.kind)
+                checked.add(key)
+            if item.kind == "metric":
+                pending_metrics.append((item.label, item.step, item.value, item.sent_at))
+                continue
+            flush_metrics()
             if is_plot:
                 _save_plot_item(db, body.run_id, body.source, item)
                 continue
@@ -836,12 +854,6 @@ def create_app(
                     raise HTTPException(400, "table には name と value が必要です")
                 db.create_result(
                     run_id=body.run_id, kind="table", label=item.label, name=item.name, step=item.step,
-                    value=item.value, image_path=None, source=body.source, sent_at=item.sent_at,
-                )
-                continue
-            if item.kind == "metric":
-                db.create_result(
-                    run_id=body.run_id, kind="metric", label=item.label, step=item.step,
                     value=item.value, image_path=None, source=body.source, sent_at=item.sent_at,
                 )
                 continue
@@ -860,6 +872,7 @@ def create_app(
             abs_path.parent.mkdir(parents=True, exist_ok=True)
             abs_path.write_bytes(image_bytes)
             db.update_result(result_id, image_path=rel_path)
+        flush_metrics()
         return Response(status_code=204)
 
     # ---- 静的配信 --------------------------------------------------------
