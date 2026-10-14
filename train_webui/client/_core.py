@@ -27,7 +27,7 @@ from pathlib import Path
 # 送信の細かいタイミング。テストから差し替えられるようモジュール変数にしておく。
 FLUSH_INTERVAL_SEC = 0.5
 BATCH_SIZE = 500
-HTTP_TIMEOUT_SEC = 5.0
+HTTP_TIMEOUT_SEC = 30.0  # 500件のバッチを server が保存し終えるまで待つ（短いと、保存は成功したのに失敗と見て警告が出る）
 HEARTBEAT_INTERVAL_SEC = 30.0
 SENDER_JOIN_TIMEOUT_SEC = 300.0  # 終了時に未送信分を送り切るまで待つ上限（短いと残りが捨てられ、グラフが途中で切れる）
 HEARTBEAT_JOIN_TIMEOUT_SEC = 2.0
