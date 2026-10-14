@@ -142,6 +142,17 @@ class RemoteController:
                 own += int(cols[1])
         return GpuUsage(total_used_mib=total, own_mib=own)
 
+    def monitor(self) -> dict:
+        # /proc/stat を 0.5 秒あけて2回読み、差分からコアごとの使用率を出す。GPU は nvidia-smi を1回
+        cmd = (
+            "cat /proc/stat; echo ---; sleep 0.5; cat /proc/stat; echo ---; "
+            "nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw "
+            "--format=csv,noheader,nounits 2>/dev/null; true"
+        )
+        proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
+        self._check(proc, "CPU/GPU使用状況の確認")
+        return parse_monitor(proc.stdout.decode("utf-8", errors="replace"))
+
     # ------------------------------------------------------------------
     # ssh/rsync コマンド組み立て
     # ------------------------------------------------------------------
@@ -255,3 +266,52 @@ class RemoteController:
             stderr = (proc.stderr or b"").decode("utf-8", errors="replace")
             tail = stderr[-_STDERR_TAIL_CHARS:].strip()
             raise RemoteError(f"{context}に失敗しました（終了コード{proc.returncode}）: {tail}")
+
+
+def _cpu_times(text: str) -> dict[str, tuple[int, int]]:
+    """/proc/stat の cpuN 行から {名前: (全体, 暇な時間)}。cpu（全体）の行は "cpu" で入る。"""
+    out: dict[str, tuple[int, int]] = {}
+    for line in text.splitlines():
+        cols = line.split()
+        if not cols or not cols[0].startswith("cpu"):
+            continue
+        vals = [int(v) for v in cols[1:] if v.isdigit()]
+        if len(vals) < 5:
+            continue
+        out[cols[0]] = (sum(vals[:8]), vals[3] + vals[4])  # idle + iowait
+    return out
+
+
+def parse_monitor(output: str) -> dict:
+    parts = output.split("---")
+    if len(parts) != 3:
+        raise RemoteError(f"モニタの出力を解釈できませんでした: {output[-500:]!r}")
+    before, after = _cpu_times(parts[0]), _cpu_times(parts[1])
+
+    def usage(name: str) -> float:
+        total = after[name][0] - before[name][0]
+        idle = after[name][1] - before[name][1]
+        return round(100.0 * (total - idle) / total, 1) if total > 0 else 0.0
+
+    names = sorted((n for n in after if n in before and n != "cpu"), key=lambda n: int(n[3:]))
+    gpus = []
+    for line in parts[2].splitlines():
+        c = [v.strip() for v in line.split(",")]
+        if len(c) != 7:
+            continue
+
+        def num(v: str) -> float | None:
+            try:
+                return float(v)
+            except ValueError:
+                return None  # "[N/A]" など
+
+        gpus.append({
+            "index": int(c[0]), "name": c[1], "util": num(c[2]), "mem_used_mib": num(c[3]),
+            "mem_total_mib": num(c[4]), "temp_c": num(c[5]), "power_w": num(c[6]),
+        })
+    return {
+        "cpu_total": usage("cpu") if "cpu" in after and "cpu" in before else None,
+        "cpu_cores": [usage(n) for n in names],
+        "gpus": gpus,
+    }

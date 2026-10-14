@@ -830,6 +830,12 @@ export const mockApi: Api = {
   getJobLog,
   getResults,
   getLabels,
+  getMonitor: async () => ({
+    cpu_total: 40,
+    cpu_cores: Array.from({ length: 16 }, () => Math.round(Math.random() * 1000) / 10),
+    gpus: [{ index: 0, name: 'NVIDIA GeForce GTX 1080', util: Math.round(Math.random() * 100), mem_used_mib: 5000,
+             mem_total_mib: 8192, temp_c: 70, power_w: 150 }],
+  }),
   getPlots,
   getBinnedPlot,
   putView: async () => {},
