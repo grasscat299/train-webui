@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -153,6 +154,9 @@ def now_iso() -> str:
 class Database:
     def __init__(self, db_path: Path) -> None:
         self._path = db_path
+        # 数万行を fetchall する読み出しは、複数スレッドで同時に走らせると行ごとの GIL の取り合いで極端に遅くなる
+        # （6 本同時で 0.5 秒の仕事が 24 秒になった）ので、1 本ずつ流す
+        self._bulk_read_lock = threading.Lock()
 
     def _connect(self) -> sqlite3.Connection:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -490,7 +494,7 @@ class Database:
             query += f" AND label NOT IN ({', '.join('?' for _ in exclude)})"
             params.extend(exclude)
         query += " ORDER BY sent_at ASC, id ASC"
-        with self._connect() as conn:
+        with self._bulk_read_lock, self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
@@ -603,7 +607,7 @@ class Database:
             query += " AND id > ?"
             params.append(after_id)
         query += " ORDER BY id ASC"
-        with self._connect() as conn:
+        with self._bulk_read_lock, self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [(r["id"], r["x"], r["y"]) for r in rows]
 
