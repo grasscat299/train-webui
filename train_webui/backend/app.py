@@ -25,6 +25,7 @@ from .db import Database, now_iso
 from .decimate import decimate_minmax, decimate_stride
 from .ids import new_group_id, new_run_id
 from .jobs import JobBusyError, JobManager
+from .remote.errors import RemoteError
 from .remote.types import RemoteControllerProtocol
 from .settings import Settings
 from .toml_utils import TomlValidationError, extract_group, find_number, set_value, set_wandb_group
@@ -424,6 +425,14 @@ def create_app(
     def get_state() -> dict:
         busy, active = job_manager.get_busy_state()
         return {"busy": busy, "active": active}
+
+    @app.get("/api/monitor")
+    async def get_monitor() -> dict:
+        """学習用PCの GPU・CPU（コアごと）の使用率。画面のモニタのパネルを開いている間だけ呼ばれる。"""
+        try:
+            return await run_in_threadpool(remote.monitor)
+        except RemoteError as e:
+            raise HTTPException(502, f"学習用PCの使用状況を取得できません: {e}") from e
 
     @app.post("/api/runs/draft")
     def create_draft(body: DraftRequest) -> dict:

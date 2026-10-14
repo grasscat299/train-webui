@@ -83,5 +83,8 @@ class RemoteControllerProtocol(Protocol):
     def read_log(self, job_dir: str, offset: int) -> tuple[bytes, int]:
         """run.log の offset バイト目以降を返す（新しい offset も返す）。ファイルが無ければ (b"", offset)。"""
 
+    def monitor(self) -> dict:
+        """学習用PCの GPU（使用率・メモリ・温度・電力）と CPU のコアごとの使用率を返す（モニタのパネル用）。"""
+
     def gpu_usage(self) -> GpuUsage:
         """学習用PCのGPUの使用メモリを、全体と自分たちのプロセスの分に分けて返す（起動前の使用中チェック用）。"""
