@@ -1,6 +1,10 @@
 # 学習管理WebUI server の設定（design.md §1.5）。初回は `cp server.example.toml server.toml`。
 # server.toml は git 管理しない。相対パスはリポジトリ直下（td_plan/）からの相対。
 
+# 学習用PCが複数あるときは [remote] を次の形にする（最初に書いた台が既定）。1台なら下の旧形式のままでよい。
+#   [remote.defaults]   共通値（user, port, key_path, python, repo_dir, run_root, stop_timeout_sec）
+#   [remote.gpu1]      host = "gpu1"; priority = 100   # 台ごとの値。defaults を上書きする
+#   [remote.gpu2]      host = "gpu2"; priority = 50
 [remote]                                   # 学習用PCの singularity instance 内の sshd（design.md §1.6）
 host             = "100.x.x.x"             # instance の tailscale の IP（~/.ssh/config の Host エイリアスでも可）
 user             = "student"

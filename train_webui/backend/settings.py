@@ -1,7 +1,7 @@
 """server.toml を読み、型付きで公開する（design.md §1.5）。backend 内の設定の唯一の参照口。"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import tomli
@@ -22,6 +22,7 @@ class RemoteSettings:
     python: str
     run_root: str
     stop_timeout_sec: float
+    priority: int = 0  # 自動選択で大きいほど先に選ぶ
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,7 @@ class ServerSettings:
 
 @dataclass(frozen=True)
 class Settings:
-    remote: RemoteSettings
+    remote: RemoteSettings  # 既定のマシン。1台構成の呼び出し側（check_remote・既存テスト）はこれを読む
     server: ServerSettings
     poll_interval_sec: float
     lost_after_sec: float
@@ -50,6 +51,29 @@ class Settings:
     job_headroom_mib: float = 4096.0
     # project の検出（main.py の AST 解析を含むリポジトリ全体の走査）結果を使い回す秒数。0 なら毎回探す
     project_scan_interval_sec: float = 30.0
+    # 名前 → 接続情報。1台構成（旧 [remote]）のときは {"default": remote}
+    machines: dict[str, RemoteSettings] = field(default_factory=dict)
+    default_machine: str = "default"
+
+    def machine_settings(self, name: str) -> Settings:
+        """name のマシンを remote に据えた Settings（RemoteController はこれを渡して作る）。"""
+        if name not in self.machines:
+            raise KeyError(f"未登録のマシン: {name}（登録済み: {', '.join(self.machines)}）")
+        return replace(self, remote=self.machines[name])
+
+
+def parse_machines(raw_remote: dict) -> tuple[dict[str, RemoteSettings], str]:
+    """[remote] を読む。旧形式（host を直に書く）は "default" 1台。
+    新形式は [remote.defaults]（共通値）と [remote.<名前>]（台ごと。defaults を上書き）。
+    最初に書いた台が既定のマシン。"""
+    if "host" in raw_remote:
+        return {"default": RemoteSettings(**raw_remote)}, "default"
+    common = dict(raw_remote.get("defaults", {}))
+    machines = {name: RemoteSettings(**{**common, **conf})
+                for name, conf in raw_remote.items() if name != "defaults"}
+    if not machines:
+        raise ValueError("[remote] にマシンが1台もありません")
+    return machines, next(iter(machines))
 
 
 def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
@@ -58,8 +82,11 @@ def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
     srv["media_dir"] = repo_root / srv["media_dir"]
     if "allowed_networks" in srv:
         srv["allowed_networks"] = tuple(srv["allowed_networks"])
+    machines, default_machine = parse_machines(raw["remote"])
     return Settings(
-        remote=RemoteSettings(**raw["remote"]),
+        remote=machines[default_machine],
+        machines=machines,
+        default_machine=default_machine,
         server=ServerSettings(**srv),
         poll_interval_sec=float(raw["log"]["poll_interval_sec"]),
         lost_after_sec=float(raw["heartbeat"]["lost_after_sec"]),
