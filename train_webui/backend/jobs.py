@@ -37,6 +37,7 @@ class JobManager:
         self._remote = remote
         self._launch_in_background = launch_in_background
         self._launch_lock = threading.Lock()
+        self._sync_lock = threading.Lock()  # 共有の repo_dir への rsync と、そこからのコード複製が重ならないように
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._stopping: set[str] = set()
@@ -77,19 +78,19 @@ class JobManager:
     # ---- 排他状態 --------------------------------------------------
 
     def get_busy_state(self) -> tuple[bool, dict[str, Any] | None]:
-        job = self._db.get_running_job()
-        if job is not None:
-            return True, {
-                "run_id": job["run_id"], "job_id": job["job_id"],
-                "kind": job["kind"], "origin": "webui",
-            }
-        cli_run = self._db.get_running_cli_run()
-        if cli_run is not None:
-            return True, {
-                "run_id": cli_run["run_id"], "job_id": None,
-                "kind": "train", "origin": "cli",
-            }
-        return False, None
+        """全スロットが埋まっているか（max_parallel_jobs=1 なら、何か 1 つ動いていれば busy）。
+        返す active は、動いているものの 1 つ目（画面の「実行中」表示用）。"""
+        jobs = self._db.list_running_jobs()
+        cli_runs = self._db.list_running_cli_runs()
+        busy = len(jobs) + len(cli_runs) >= max(1, self._settings.max_parallel_jobs)
+        if jobs:
+            job = jobs[0]
+            active = {"run_id": job["run_id"], "job_id": job["job_id"], "kind": job["kind"], "origin": "webui"}
+        elif cli_runs:
+            active = {"run_id": cli_runs[0]["run_id"], "job_id": None, "kind": "train", "origin": "cli"}
+        else:
+            return False, None
+        return busy, active
 
     # ---- 起動 --------------------------------------------------------
 
@@ -109,6 +110,10 @@ class JobManager:
             fn(*args)
 
     def _launch_train(self, run_id: str, job_id: str, run: dict) -> None:
+        with self._sync_lock:
+            self._launch_train_locked(run_id, job_id, run)
+
+    def _launch_train_locked(self, run_id: str, job_id: str, run: dict) -> None:
         try:
             if run.get("code_commit"):
                 # 過去の run のコードで再実行する下書き。ローカルの作業ツリーではなく、記録した commit を送る
@@ -159,6 +164,10 @@ class JobManager:
         return job
 
     def _launch_infer(self, run_id: str, job_id: str, run: dict, project: str) -> None:
+        with self._sync_lock:
+            self._launch_infer_locked(run_id, job_id, run, project)
+
+    def _launch_infer_locked(self, run_id: str, job_id: str, run: dict, project: str) -> None:
         try:
             sync_info = self._remote.sync_code()
             self._db.create_sync(
@@ -180,6 +189,8 @@ class JobManager:
             busy, _ = self.get_busy_state()
             if busy:
                 raise JobBusyError("GPUを使用中の別のジョブがあります")
+            if self._db.get_running_job_for_run(run_id) is not None:
+                raise JobBusyError("この run のジョブがすでに動いています")
             job_id = new_job_id(run_id, kind, exists=lambda j: j in self._db.list_job_ids())
             self._db.create_job(
                 job_id=job_id, run_id=run_id, kind=kind, status="running", started_at=now_iso(),

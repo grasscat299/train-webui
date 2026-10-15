@@ -1,6 +1,7 @@
 """backendのテスト用フィクスチャ。学習用PCに触れないよう、RemoteControllerProtocol を満たす FakeRemote に差し替える。"""
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -125,10 +126,12 @@ def app_factory(tmp_path: Path):
 
     def _make(repo_root: Path | None = None, remote: FakeRemote | None = None,
               start_background: bool = False, poll_interval_sec: float = 0.01,
-              lost_after_sec: float = 5.0):
+              lost_after_sec: float = 5.0, max_parallel_jobs: int = 1):
         root = repo_root or (tmp_path / "repo")
         root.mkdir(parents=True, exist_ok=True)
         settings = make_settings(tmp_path, root, poll_interval_sec, lost_after_sec)
+        if max_parallel_jobs != 1:
+            settings = dataclasses.replace(settings, max_parallel_jobs=max_parallel_jobs)
         fake = remote or FakeRemote()
         app = create_app(settings, remote=fake, start_background=start_background)
         created.append(app)

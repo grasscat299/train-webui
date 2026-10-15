@@ -64,7 +64,15 @@ class RemoteController:
 
     def launch(self, spec: LaunchSpec) -> LaunchResult:
         r = self._settings.remote
-        remote_config_path = f"{r.repo_dir}/{spec.project_dir}/config.toml"
+        job_dir = f"{r.run_root}/{spec.run_id}/{spec.job_id}"
+        isolate = self._settings.max_parallel_jobs > 1
+        # 同時に複数のジョブを動かす時は、ジョブごとにコードの複製（<job_dir>/code）を作ってそこで動かす。
+        # 共有の repo_dir は次のジョブの rsync --delete や config.toml の書き換えで、動いているジョブの足元が変わるため
+        code_dir = f"{job_dir}/code" if isolate else r.repo_dir
+        if isolate:
+            snap = f"mkdir -p {shlex.quote(job_dir)} && cp -a {shlex.quote(r.repo_dir)} {shlex.quote(code_dir)}"
+            self._check(self._ssh_run(snap, timeout=_RSYNC_TIMEOUT_SEC), "コードの複製")
+        remote_config_path = f"{code_dir}/{spec.project_dir}/config.toml"
         write_cmd = f"cat > {shlex.quote(remote_config_path)}"
         proc = self._ssh_run(write_cmd, input=spec.config_toml.encode("utf-8"), timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "config.tomlの書き込み")
@@ -74,8 +82,7 @@ class RemoteController:
         proc = self._ssh_run(snap_cmd, input=spec.config_toml.encode("utf-8"), timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "configスナップショットの書き込み")
 
-        job_dir = f"{r.run_root}/{spec.run_id}/{spec.job_id}"
-        remote_cmd = self._build_launch_command(spec, job_dir)
+        remote_cmd = self._build_launch_command(spec, job_dir, code_dir)
         proc = self._ssh_run(remote_cmd, timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "ジョブの起動")
         pid = self._parse_pid(proc.stdout)
@@ -126,12 +133,13 @@ class RemoteController:
         cmd = (
             "nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits; echo ---; "
             "nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits; echo ---; "
-            "ps -eo pid --no-headers"
+            "ps -eo pid --no-headers; echo ---; "
+            "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits"
         )
         proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "GPU使用状況の確認")
         parts = proc.stdout.decode("utf-8", errors="replace").split("---")
-        if len(parts) != 3:
+        if len(parts) not in (3, 4):
             raise RemoteError(f"GPU使用状況の出力を解釈できませんでした: {proc.stdout[-500:]!r}")
         total = sum(int(v) for v in parts[0].split() if v.strip().isdigit())
         own_pids = {int(v) for v in parts[2].split() if v.strip().isdigit()}
@@ -140,7 +148,8 @@ class RemoteController:
             cols = [c.strip() for c in line.split(",")]
             if len(cols) == 2 and cols[0].isdigit() and cols[1].isdigit() and int(cols[0]) in own_pids:
                 own += int(cols[1])
-        return GpuUsage(total_used_mib=total, own_mib=own)
+        total_mem = sum(int(v) for v in parts[3].split() if v.strip().isdigit()) if len(parts) == 4 else 0
+        return GpuUsage(total_used_mib=total, own_mib=own, total_mib=total_mem)
 
     # ------------------------------------------------------------------
     # ssh/rsync コマンド組み立て
@@ -158,7 +167,7 @@ class RemoteController:
         key = shlex.quote(os.path.expanduser(r.key_path))
         return f"ssh -p {r.port} -i {key} -o BatchMode=yes -o ConnectTimeout=10"
 
-    def _build_launch_command(self, spec: LaunchSpec, job_dir: str) -> str:
+    def _build_launch_command(self, spec: LaunchSpec, job_dir: str, code_dir: str | None = None) -> str:
         r = self._settings.remote
         module = spec.project_dir.replace("/", ".")
         env_parts = [
@@ -181,7 +190,7 @@ class RemoteController:
         )
         # `a && b && c &` だと連結全体が背景化され mkdir 前に run.pid を書きうるので、背景化部分だけ括弧で囲む
         return (
-            f"cd {shlex.quote(r.repo_dir)} && mkdir -p {quoted_job_dir} {shlex.quote(f'{r.run_root}/{spec.run_id}/artifacts')} && "
+            f"cd {shlex.quote(code_dir or r.repo_dir)} && mkdir -p {quoted_job_dir} {shlex.quote(f'{r.run_root}/{spec.run_id}/artifacts')} && "
             f"( setsid nohup sh -c {shlex.quote(inner)} > {quoted_job_dir}/run.log 2>&1 < /dev/null & "
             f"echo $! > {quoted_job_dir}/run.pid ) && cat {quoted_job_dir}/run.pid"
         )

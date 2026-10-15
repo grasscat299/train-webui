@@ -386,6 +386,11 @@ def create_app(
             usage = remote.gpu_usage()
         except Exception as e:  # ssh 失敗等。確認できないまま起動はしない
             raise HTTPException(502, f"学習用PCのGPU使用状況を確認できないため起動しません: {e}") from e
+        if settings.max_parallel_jobs > 1 and usage.total_mib and job_manager.get_busy_state()[1] is not None \
+                and usage.free_mib < settings.job_headroom_mib:
+            raise HTTPException(
+                409, f"GPU の空きメモリが足りないため起動しません（空き {usage.free_mib} MiB、必要 {settings.job_headroom_mib:g} MiB）",
+            )
         threshold = settings.gpu_busy_threshold_mib
         if usage.other_mib > threshold:
             raise HTTPException(

@@ -24,7 +24,7 @@ def test_ssh_base_args_expand_tilde_and_options(settings_factory):
 
 
 def test_launch_sends_config_then_launch_command(settings_factory):
-    runner = FakeRunner(responses=[ok(), ok(stdout=b"12345\n")])
+    runner = FakeRunner(responses=[ok(), ok(), ok(stdout=b"12345\n")])
     controller = RemoteController(settings_factory(), runner=runner)
     spec = LaunchSpec(
         run_id="20260925_143012", job_id="20260925_143012__train__143012",
@@ -34,7 +34,7 @@ def test_launch_sends_config_then_launch_command(settings_factory):
 
     assert result.pid == 12345
     assert result.job_dir == "/home/user/train_webui_runs/20260925_143012/20260925_143012__train__143012"
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 3  # config 書き込み・run 保管場所への config 複製・起動
 
     # 1回目: config.toml の書き込み
     write_call = runner.calls[0]
@@ -44,7 +44,7 @@ def test_launch_sends_config_then_launch_command(settings_factory):
     assert "/home/user/td_plan/src/world_model_v1/config.toml" in write_cmd
 
     # 2回目: 起動コマンド
-    launch_call = runner.calls[1]
+    launch_call = runner.calls[2]
     launch_cmd = launch_call["args"][-1]
     assert "setsid nohup sh -c" in launch_cmd
     assert "mkdir -p" in launch_cmd
@@ -64,7 +64,7 @@ def test_launch_sends_config_then_launch_command(settings_factory):
 
 
 def test_launch_quotes_paths_with_special_characters(settings_factory):
-    runner = FakeRunner(responses=[ok(), ok(stdout=b"999\n")])
+    runner = FakeRunner(responses=[ok(), ok(), ok(stdout=b"999\n")])
     settings = settings_factory()
     # repo_dir/python/run_root にスペースやシングルクォートを含めて壊れないことを確認する
     from ...settings import RemoteSettings
@@ -87,7 +87,7 @@ def test_launch_quotes_paths_with_special_characters(settings_factory):
     result = controller.launch(spec)
     assert result.pid == 999
 
-    launch_cmd = runner.calls[1]["args"][-1]
+    launch_cmd = runner.calls[2]["args"][-1]
     write_cmd = runner.calls[0]["args"][-1]
     _assert_valid_sh_syntax(launch_cmd)
     _assert_valid_sh_syntax(write_cmd)
@@ -118,3 +118,20 @@ def test_launch_raises_remote_error_when_pid_unparseable(settings_factory):
 def _assert_valid_sh_syntax(command: str) -> None:
     proc = subprocess.run(["sh", "-n", "-c", command], capture_output=True)
     assert proc.returncode == 0, f"sh -n が失敗: {proc.stderr.decode(errors='replace')}\ncommand={command!r}"
+
+
+def test_launch_isolates_code_per_job_when_parallel(settings_factory):
+    import dataclasses
+
+    runner = FakeRunner(responses=[ok(), ok(), ok(), ok(stdout=b"777\n")])
+    settings = dataclasses.replace(settings_factory(), max_parallel_jobs=2)
+    spec = LaunchSpec(run_id="r1", job_id="r1__train__1", kind="train", project_dir="src/world_model_v2",
+                      config_toml="x=1\n")
+    result = RemoteController(settings, runner=runner).launch(spec)
+    job_dir = result.job_dir
+    snap, write, snap_cfg, launch = (c["args"][-1] for c in runner.calls)
+    assert f"cp -a /home/user/td_plan {job_dir}/code" in snap
+    # config は共有の repo_dir ではなく、複製したコードの中に書く
+    assert f"cat > {job_dir}/code/src/world_model_v2/config.toml" in write
+    assert f"cd {job_dir}/code &&" in launch
+    assert result.pid == 777
