@@ -13,7 +13,7 @@ def _git_responses(commit="abc123\n", diff="diff --git a b\n", untracked_list=""
 
 
 def test_sync_code_runs_git_then_rsync_with_excludes(settings_factory, tmp_path):
-    responses = _git_responses() + [ok()]  # 最後がrsync
+    responses = _git_responses() + [ok(), ok()]  # 最後の2つが mkdir（同期先の作成）と rsync
     runner = FakeRunner(responses=responses)
     settings = settings_factory(sync_exclude=[".git/", "venv/", "wandb/"])
     controller = RemoteController(settings, runner=runner)
@@ -30,7 +30,8 @@ def test_sync_code_runs_git_then_rsync_with_excludes(settings_factory, tmp_path)
     assert calls[1]["args"][3:] == ["diff", "HEAD"]
     assert calls[2]["args"][3:] == ["ls-files", "--others", "--exclude-standard"]
 
-    rsync_args = calls[3]["args"]
+    assert calls[3]["args"][0] == "ssh" and "mkdir -p" in calls[3]["args"][-1]  # 同期先が無い新しい台でも初回から動く
+    rsync_args = calls[4]["args"]
     assert rsync_args[0] == "rsync"
     assert "-az" in rsync_args
     assert "--delete" in rsync_args

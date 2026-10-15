@@ -236,6 +236,9 @@ class RemoteController:
 
     def _rsync(self, source: Path | None = None) -> None:
         r = self._settings.remote
+        # rsync は最後の1階層しか作らない。新しい学習用PC（repo_dir・run_root がまだ無い）でも初回から動くように先に作る
+        mk = self._ssh_run(f"mkdir -p {shlex.quote(r.repo_dir)} {shlex.quote(r.run_root)}", timeout=_SSH_TIMEOUT_SEC)
+        self._check(mk, "同期先ディレクトリの作成")
         args = ["rsync", "-az", "--delete", "-e", self._ssh_dash_e()]
         for pattern in self._settings.sync_exclude:
             args += ["--exclude", pattern]
