@@ -725,3 +725,21 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
 .avg-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted, inherit); }
 .avg-toggle select, .avg-toggle input { font-size: 11px; background: transparent; color: inherit; border: 1px solid var(--grid); border-radius: 4px; padding: 1px 3px; }
 .avg-toggle input { width: 56px; }
+
+/* Monitor タブ（学習用PCの GPU・CPU の使用率） */
+.mon-panel { padding: 16px 20px; overflow: auto; }
+.mon-panel h2 { font-size: 15px; margin: 0 0 12px; }
+.mon-panel h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted); }
+.mon-gpu { margin-bottom: 12px; }
+.mon-gpu-name { font-size: 13px; margin-bottom: 4px; }
+.mon-note { color: var(--muted); font-size: 13px; }
+.mon-cores { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); column-gap: 24px; }
+.mon-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 3px 0; }
+.mon-label { width: 44px; color: var(--muted); text-align: right; flex: none; }
+.mon-track { flex: 1; height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; min-width: 80px; }
+.mon-fill { height: 100%; transition: width 0.4s; }
+.mon-fill.low { background: var(--accent); }
+.mon-fill.mid { background: #e0a030; }
+.mon-fill.high { background: #d9534f; }
+.mon-value { width: 40px; text-align: right; font-variant-numeric: tabular-nums; flex: none; }
+.mon-detail { color: var(--muted); flex: none; }

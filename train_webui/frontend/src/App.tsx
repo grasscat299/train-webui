@@ -6,6 +6,7 @@ import { usePersistentState } from './hooks/usePersistentState';
 import { Tree } from './components/Tree';
 import { TrainPanel } from './components/TrainPanel';
 import { ResultPanel } from './components/ResultPanel';
+import { MonitorPanel } from './components/MonitorPanel';
 import { ComparisonBar } from './components/ComparisonBar';
 import { NavResizer } from './components/NavResizer';
 import { CommentSidebar } from './components/CommentSidebar';
@@ -14,7 +15,7 @@ import { ViewSettingsMenu } from './components/ViewSettingsMenu';
 import type { Theme } from './components/ViewSettingsMenu';
 import { DEFAULT_VIEW, ViewContext, useViewSettings, viewStyle } from './viewSettings';
 
-type Tab = 'train' | 'result';
+type Tab = 'train' | 'result' | 'monitor';
 
 // コメント欄をこの幅（px）より狭くドラッグしたら閉じる
 const COMMENT_CLOSE_WIDTH = 140;
@@ -23,6 +24,8 @@ export default function App() {
   const { view, update: updateView, reset: resetView } = useViewSettings();
   // 開いていたタブ・選んでいた run・Result の比較対象は、再読み込みしてもそのまま残す
   const [tab, setTab] = usePersistentState<Tab>('tab', 'train');
+  // モニタのタブはツリー・コメント欄・画面構成の送信には関係しないので、それらは直前と同じ Train 扱いにする
+  const dataTab: 'train' | 'result' = tab === 'result' ? 'result' : 'train';
   const [selectedRunId, setSelectedRunId] = usePersistentState<string | null>('selectedRunId', null);
   const [runChecked, setRunChecked] = usePersistentState<Record<string, boolean>>('runChecked', {});
   const [groupChecked, setGroupChecked] = usePersistentState<Record<string, boolean>>('groupChecked', {});
@@ -169,12 +172,12 @@ export default function App() {
 
   // 画面で今見ている構成を server に送る。Claude が「Result 画面を見て」と言われた時に `cli view` で読む。
   // 操作のたびに送ると多いので、止まってから送る
-  const viewRunIds = tab === 'train' ? (selectedRunId ? [selectedRunId] : []) : selectedRunIds;
-  const viewKey = JSON.stringify([tab, viewRunIds, tab === 'result' ? visibleLabels : []]);
+  const viewRunIds = dataTab === 'train' ? (selectedRunId ? [selectedRunId] : []) : selectedRunIds;
+  const viewKey = JSON.stringify([dataTab, viewRunIds, dataTab === 'result' ? visibleLabels : []]);
   useEffect(() => {
     if (tree === null || tree === undefined) return; // ツリーを取れてから（消えた run を送らない）
     const timer = window.setTimeout(() => {
-      api.putView(tab, viewRunIds, tab === 'result' ? visibleLabels : []).catch(() => {});
+      api.putView(dataTab, viewRunIds, dataTab === 'result' ? visibleLabels : []).catch(() => {});
     }, 500);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,9 +190,9 @@ export default function App() {
     treeData.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => {
       byId.set(r.run_id, { runId: r.run_id, label: `${r.display_name} (${g.group_name})`, comment: r.comment });
     })));
-    const ids = tab === 'train' ? (selectedRunId ? [selectedRunId] : []) : selectedRunIds;
+    const ids = dataTab === 'train' ? (selectedRunId ? [selectedRunId] : []) : selectedRunIds;
     return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
-  }, [treeData, tab, selectedRunId, selectedRunIds]);
+  }, [treeData, dataTab, selectedRunId, selectedRunIds]);
 
   const handleNewRunDraft = async (project: string, group: string) => {
     try {
@@ -267,6 +270,9 @@ export default function App() {
             <button className={tab === 'result' ? 'active' : ''} onClick={() => setTab('result')}>
               Result
             </button>
+            <button className={tab === 'monitor' ? 'active' : ''} onClick={() => setTab('monitor')}>
+              Monitor
+            </button>
           </nav>
           <ViewSettingsMenu view={view} onChange={updateView} onReset={resetView} theme={theme} onThemeChange={setTheme} />
           <button className="rescan" onClick={rescan}>
@@ -286,7 +292,7 @@ export default function App() {
         <div className="layout">
           <Tree
             tree={treeData}
-            mode={tab}
+            mode={dataTab}
             busy={busy}
             selectedRunId={selectedRunId}
             onSelectRun={setSelectedRunId}
@@ -311,7 +317,9 @@ export default function App() {
             onReset={() => updateView('navWidth', DEFAULT_VIEW.navWidth)}
           />
           <main className="main">
-            {tab === 'train' ? (
+            {tab === 'monitor' ? (
+              <MonitorPanel />
+            ) : tab === 'train' ? (
               <TrainPanel
                 runId={selectedRunId}
                 busy={busy}
@@ -371,7 +379,7 @@ export default function App() {
             open={commentsOpen}
             onToggle={() => setCommentsOpen(!commentsOpen)}
             runs={sidebarRuns}
-            emptyText={tab === 'train' ? '左のツリーで run を選ぶと、その run のコメントを書けます。' : '比較する run を目のアイコンで選ぶと、ここに並びます。'}
+            emptyText={dataTab === 'train' ? '左のツリーで run を選ぶと、その run のコメントを書けます。' : '比較する run を目のアイコンで選ぶと、ここに並びます。'}
             onSaved={rescan}
           />
         </div>

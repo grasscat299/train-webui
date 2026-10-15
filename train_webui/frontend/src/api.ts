@@ -203,6 +203,23 @@ export class ApiError extends Error {
   }
 }
 
+export interface MonitorGpu {
+  index: number;
+  name: string;
+  util: number | null; // %
+  mem_used_mib: number | null;
+  mem_total_mib: number | null;
+  temp_c: number | null;
+  power_w: number | null;
+}
+
+// 学習用PCの使用状況（GET /api/monitor）。cpu_cores は論理コアごとの使用率(%)
+export interface MonitorResp {
+  cpu_total: number | null;
+  cpu_cores: number[];
+  gpus: MonitorGpu[];
+}
+
 export interface Api {
   getTree(): Promise<ProjectNode[]>;
   rescan(): Promise<ProjectNode[]>;
@@ -229,6 +246,7 @@ export interface Api {
     opts?: { afterId?: number | null; maxPoints?: number },
   ): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
+  getMonitor(): Promise<MonitorResp>;
   // omitStepLines: 横軸が step の line は点を返さない。label: そのグラフだけ取る
   getPlots(runId: string, afterId?: number | null, opts?: { omitStepLines?: boolean; label?: string }): Promise<Plot[]>;
   // line のグラフを x の幅ごとに平均して取る。bin は "epoch"（config の steps_per_epoch）か幅の数値
@@ -323,6 +341,7 @@ const realApi: Api = {
     const qs = params.toString();
     return request<Result[]>(`/api/runs/${encodeURIComponent(runId)}/results${qs ? `?${qs}` : ''}`);
   },
+  getMonitor: () => request<MonitorResp>('/api/monitor'),
   getLabels: (runIds) =>
     request<LabelInfo[]>(`/api/labels?run_ids=${encodeURIComponent(runIds.join(','))}`),
   getPlots: (runId, afterId, opts) => {
