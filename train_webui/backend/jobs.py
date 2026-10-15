@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from .db import Database, now_iso
 from .ids import new_job_id
+from .remote.registry import RemoteRegistry
 from .remote.types import LaunchSpec, RemoteControllerProtocol
 from .settings import Settings
 
@@ -22,7 +23,7 @@ class JobBusyError(Exception):
 
 
 class JobManager:
-    def __init__(self, settings: Settings, db: Database, remote: RemoteControllerProtocol,
+    def __init__(self, settings: Settings, db: Database, remote: RemoteControllerProtocol | RemoteRegistry,
                  launch_in_background: bool = True,
                  snapshot_code: Callable[[str], str] | None = None,
                  export_code: Callable[[str, Path], None] | None = None,
@@ -34,10 +35,13 @@ class JobManager:
         self._tag_code = tag_code  # tag_code(run_id, commit): 再実行する run にも、同じ commit への ref を付ける
         self._settings = settings
         self._db = db
-        self._remote = remote
+        # 1台だけの remote（テスト等）が渡されたら、既定のマシンとして包む
+        self._registry = remote if isinstance(remote, RemoteRegistry) else RemoteRegistry.single(
+            remote, settings.default_machine)
         self._launch_in_background = launch_in_background
         self._launch_lock = threading.Lock()
-        self._sync_lock = threading.Lock()  # 共有の repo_dir への rsync と、そこからのコード複製が重ならないように
+        # 共有の repo_dir への rsync と、そこからのコード複製が重ならないように（台ごと。repo_dir は台ごとに別なので）
+        self._sync_locks = {name: threading.Lock() for name in self._registry.names}
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._stopping: set[str] = set()
@@ -75,14 +79,34 @@ class JobManager:
             self._poll_one_job(job)
         self._check_heartbeats()
 
+    # ---- マシン ----------------------------------------------------
+
+    def machine_of(self, row: dict) -> str:
+        """run / job の行が動いた（動いている）台。記録が無い古い行は既定のマシン。"""
+        return row.get("machine") or self._registry.default_name
+
+    def _remote_for(self, row: dict) -> RemoteControllerProtocol:
+        return self._registry.get(self.machine_of(row))
+
+    def own_jobs_by_machine(self) -> dict[str, int]:
+        """台ごとの、動いているジョブの数（CLI 起動の run は台が分からないので既定のマシンに数える）。"""
+        counts: dict[str, int] = {}
+        for job in self._db.list_running_jobs():
+            name = self.machine_of(job)
+            counts[name] = counts.get(name, 0) + 1
+        cli = len(self._db.list_running_cli_runs())
+        if cli:
+            counts[self._registry.default_name] = counts.get(self._registry.default_name, 0) + cli
+        return counts
+
     # ---- 排他状態 --------------------------------------------------
 
     def get_busy_state(self) -> tuple[bool, dict[str, Any] | None]:
-        """全スロットが埋まっているか（max_parallel_jobs=1 なら、何か 1 つ動いていれば busy）。
+        """全台の全スロットが埋まっているか（1台で max_parallel_jobs=1 なら、何か 1 つ動いていれば busy）。
         返す active は、動いているものの 1 つ目（画面の「実行中」表示用）。"""
         jobs = self._db.list_running_jobs()
         cli_runs = self._db.list_running_cli_runs()
-        busy = len(jobs) + len(cli_runs) >= max(1, self._settings.max_parallel_jobs)
+        busy = len(jobs) + len(cli_runs) >= max(1, self._settings.max_parallel_jobs) * len(self._registry.names)
         if jobs:
             job = jobs[0]
             active = {"run_id": job["run_id"], "job_id": job["job_id"], "kind": job["kind"], "origin": "webui"}
@@ -94,14 +118,16 @@ class JobManager:
 
     # ---- 起動 --------------------------------------------------------
 
-    def start_train(self, run_id: str) -> None:
-        """draft を起動する。jobを確保したら戻り、sync_code → launch は裏で進める（rsyncが長いため）。"""
+    def start_train(self, run_id: str, machine: str | None = None) -> None:
+        """draft を起動する。jobを確保したら戻り、sync_code → launch は裏で進める（rsyncが長いため）。
+        machine は動かす台（None なら既定のマシン。自動選択は呼び出し側 = MachineManager.choose）。"""
         run = self._db.get_run(run_id)
         if run is None:
             raise ValueError("run が見つかりません")
-        job_id = self._reserve_job(run_id, kind="train")
-        self._db.update_run(run_id, status="running", started_at=now_iso())
-        self._spawn(self._launch_train, run_id, job_id, run)
+        machine = machine or self._registry.default_name
+        job_id = self._reserve_job(run_id, kind="train", machine=machine)
+        self._db.update_run(run_id, status="running", started_at=now_iso(), machine=machine)
+        self._spawn(self._launch_train, run_id, job_id, run, machine)
 
     def _spawn(self, fn, *args) -> None:
         if self._launch_in_background:
@@ -109,19 +135,20 @@ class JobManager:
         else:
             fn(*args)
 
-    def _launch_train(self, run_id: str, job_id: str, run: dict) -> None:
-        with self._sync_lock:
-            self._launch_train_locked(run_id, job_id, run)
+    def _launch_train(self, run_id: str, job_id: str, run: dict, machine: str) -> None:
+        with self._sync_locks[machine]:
+            self._launch_train_locked(run_id, job_id, run, machine)
 
-    def _launch_train_locked(self, run_id: str, job_id: str, run: dict) -> None:
+    def _launch_train_locked(self, run_id: str, job_id: str, run: dict, machine: str) -> None:
+        remote = self._registry.get(machine)
         try:
             if run.get("code_commit"):
                 # 過去の run のコードで再実行する下書き。ローカルの作業ツリーではなく、記録した commit を送る
-                self._sync_recorded_code(run["code_commit"])
+                self._sync_recorded_code(run["code_commit"], remote)
                 if self._tag_code is not None:
                     self._tag_code(run_id, run["code_commit"])
             else:
-                sync_info = self._remote.sync_code()
+                sync_info = remote.sync_code()
                 self._db.create_sync(
                     synced_at=now_iso(), git_commit=sync_info.git_commit,
                     git_diff=sync_info.git_diff, git_untracked=sync_info.git_untracked,
@@ -137,17 +164,17 @@ class JobManager:
                 project_dir=run["project"], config_toml=run["config_toml"],
                 parent_run_id=run.get("parent_run_id"),
             )
-            result = self._remote.launch(spec)
+            result = remote.launch(spec)
             self._db.update_job(job_id, pid=result.pid, job_dir=result.job_dir)
         except Exception as e:  # noqa: BLE001 - remoteの失敗は種類を問わずfailedにする
             self._fail_job_and_run(job_id, run_id, str(e), also_run=True)
 
-    def _sync_recorded_code(self, commit: str) -> None:
+    def _sync_recorded_code(self, commit: str, remote: RemoteControllerProtocol) -> None:
         if self._export_code is None:
             raise RuntimeError("過去のコードを取り出せません（コードの記録が無効です）")
         with tempfile.TemporaryDirectory() as tmp:
             self._export_code(commit, Path(tmp))
-            self._remote.sync_code(Path(tmp))
+            remote.sync_code(Path(tmp))
 
     def start_infer(self, run_id: str, project: str, config_toml: str | None = None) -> dict:
         """groupの[infer]ボタン。対象runは変えず、jobだけ作って起動する。
@@ -157,19 +184,21 @@ class JobManager:
             raise ValueError("run が見つかりません")
         if config_toml is not None:
             run = {**run, "config_toml": config_toml}
-        job_id = self._reserve_job(run_id, kind="infer")
-        self._spawn(self._launch_infer, run_id, job_id, run, project)
+        machine = self.machine_of(run)  # 重みはその run を学習した台にある
+        job_id = self._reserve_job(run_id, kind="infer", machine=machine)
+        self._spawn(self._launch_infer, run_id, job_id, run, project, machine)
         job = self._db.get_job(job_id)
         assert job is not None
         return job
 
-    def _launch_infer(self, run_id: str, job_id: str, run: dict, project: str) -> None:
-        with self._sync_lock:
-            self._launch_infer_locked(run_id, job_id, run, project)
+    def _launch_infer(self, run_id: str, job_id: str, run: dict, project: str, machine: str) -> None:
+        with self._sync_locks[machine]:
+            self._launch_infer_locked(run_id, job_id, run, project, machine)
 
-    def _launch_infer_locked(self, run_id: str, job_id: str, run: dict, project: str) -> None:
+    def _launch_infer_locked(self, run_id: str, job_id: str, run: dict, project: str, machine: str) -> None:
+        remote = self._registry.get(machine)
         try:
-            sync_info = self._remote.sync_code()
+            sync_info = remote.sync_code()
             self._db.create_sync(
                 synced_at=now_iso(), git_commit=sync_info.git_commit,
                 git_diff=sync_info.git_diff, git_untracked=sync_info.git_untracked,
@@ -178,22 +207,22 @@ class JobManager:
                 run_id=run_id, job_id=job_id, kind="infer",
                 project_dir=project, config_toml=run["config_toml"],
             )  # 推論は parent を使わない（その run 自身の重みを artifacts から読む）
-            result = self._remote.launch(spec)
+            result = remote.launch(spec)
             self._db.update_job(job_id, pid=result.pid, job_dir=result.job_dir)
         except Exception as e:  # noqa: BLE001
             self._fail_job_and_run(job_id, run_id, str(e), also_run=False)
 
-    def _reserve_job(self, run_id: str, kind: str) -> str:
+    def _reserve_job(self, run_id: str, kind: str, machine: str | None = None) -> str:
         """busyチェックとjob行の作成をロック内でアトミックに行う（2重起動レース対策）。"""
+        machine = machine or self._registry.default_name
         with self._launch_lock:
-            busy, _ = self.get_busy_state()
-            if busy:
+            if self.own_jobs_by_machine().get(machine, 0) >= max(1, self._settings.max_parallel_jobs):
                 raise JobBusyError("GPUを使用中の別のジョブがあります")
             if self._db.get_running_job_for_run(run_id) is not None:
                 raise JobBusyError("この run のジョブがすでに動いています")
             job_id = new_job_id(run_id, kind, exists=lambda j: j in self._db.list_job_ids())
             self._db.create_job(
-                job_id=job_id, run_id=run_id, kind=kind, status="running", started_at=now_iso(),
+                job_id=job_id, run_id=run_id, kind=kind, status="running", started_at=now_iso(), machine=machine,
             )
             return job_id
 
@@ -217,7 +246,7 @@ class JobManager:
         try:
             error = None
             try:
-                self._remote.stop(job["pid"])
+                self._remote_for(job).stop(job["pid"])
             except Exception as e:  # noqa: BLE001
                 error = str(e)
             self._pull_log(job)
@@ -239,7 +268,7 @@ class JobManager:
                 return  # 停止処理側が stopped で確定させる（ここで failed と書くと競合する）
         self._pull_log(job)
         try:
-            state = self._remote.poll(job["pid"], job["job_dir"])
+            state = self._remote_for(job).poll(job["pid"], job["job_dir"])
         except Exception:  # noqa: BLE001 - 一時的な通信断はリトライに任せる
             return
         if state.alive:
@@ -259,7 +288,7 @@ class JobManager:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         offset = local_path.stat().st_size if local_path.exists() else 0
         try:
-            data, _new_offset = self._remote.read_log(job["job_dir"], offset)
+            data, _new_offset = self._remote_for(job).read_log(job["job_dir"], offset)
         except Exception:  # noqa: BLE001 - ログ取得の失敗はジョブを止めない
             return
         if data:

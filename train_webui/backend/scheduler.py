@@ -44,7 +44,7 @@ def _reason(s: MachineState, by_name: dict[str, MachineState], rule: Rule) -> st
     if s.other_active:
         return f"他の人が使用中です（{s.other_mib} MiB）" if s.other_mib else "他の人が直近まで使用していました"
     if s.own_jobs >= max(1, rule.max_parallel_jobs):
-        return "自分のジョブで満杯です"
+        return "自分の別のジョブで満杯です"
     if s.own_jobs > 0 and s.free_mib is not None and s.free_mib < rule.job_headroom_mib:
         return f"GPU の空きメモリが足りません（空き {s.free_mib} MiB、必要 {rule.job_headroom_mib:g} MiB）"
     if s.own_jobs == 0:  # 新しく台を使い始めるときだけ、チームの枠を確認する

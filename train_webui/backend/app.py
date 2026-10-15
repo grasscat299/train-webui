@@ -26,6 +26,8 @@ from .decimate import decimate_minmax, decimate_stride
 from .ids import new_group_id, new_run_id
 from .jobs import JobBusyError, JobManager
 from .remote.errors import RemoteError
+from .machines import MachineManager, SelectionError
+from .remote.registry import RemoteRegistry
 from .remote.types import RemoteControllerProtocol
 from .settings import Settings
 from .toml_utils import TomlValidationError, extract_group, find_number, set_value, set_wandb_group
@@ -170,7 +172,7 @@ def _run_summary(row: dict, group_name: str | None = None) -> dict:
         "origin": row["origin"], "status": row["status"],
         "created_at": row["created_at"], "started_at": row["started_at"], "ended_at": row["ended_at"],
         "comment": row["comment"] or "", "parent_run_id": row.get("parent_run_id"),
-        "code_commit": row.get("code_commit"),
+        "code_commit": row.get("code_commit"), "machine": row.get("machine"),
     }
 
 
@@ -178,7 +180,7 @@ def _job_public(row: dict) -> dict:
     return {
         "job_id": row["job_id"], "run_id": row["run_id"], "kind": row["kind"], "status": row["status"],
         "started_at": row["started_at"], "ended_at": row["ended_at"],
-        "exit_code": row["exit_code"], "error": row["error"],
+        "exit_code": row["exit_code"], "error": row["error"], "machine": row.get("machine"),
     }
 
 
@@ -337,14 +339,16 @@ def _build_draft_config(db: Database, settings: Settings, project: str, group: s
 
 def create_app(
     settings: Settings,
-    remote: RemoteControllerProtocol | None = None,
+    remote: RemoteControllerProtocol | RemoteRegistry | None = None,
     start_background: bool = True,
 ) -> FastAPI:
     real_remote = remote is None
     if remote is None:
-        from .remote import RemoteController  # 遅延import（担当Cの実体。テストでは差し替える）
-
-        remote = RemoteController(settings)
+        registry = RemoteRegistry.from_settings(settings)  # 台ごとの RemoteController
+    elif isinstance(remote, RemoteRegistry):
+        registry = remote
+    else:  # 1台だけの remote（テストの偽物）は既定のマシンとして包む
+        registry = RemoteRegistry.single(remote, settings.default_machine)
 
     settings.server.media_dir.mkdir(parents=True, exist_ok=True)
     db = Database(settings.server.db_path)
@@ -356,7 +360,7 @@ def create_app(
             "export_code": lambda commit, dest: code_snapshot.export_commit(settings.repo_root, commit, dest),
             "tag_code": lambda run_id, commit: code_snapshot.set_ref(settings.repo_root, run_id, commit),
         }
-    job_manager = JobManager(settings, db, remote, launch_in_background=start_background, **snapshot_kwargs)
+    job_manager = JobManager(settings, db, registry, launch_in_background=start_background, **snapshot_kwargs)
     if start_background:
         job_manager.start_background()
 
@@ -381,24 +385,26 @@ def create_app(
 
     # ---- frontend 向け（CONTRACT.md §2.2） ---------------------------
 
-    def check_gpu_free() -> None:
-        """学習用PCのGPUを他の人が使っていないか確認し、使っていれば起動させない（design.md §4）。"""
+    machine_manager = MachineManager(settings, registry, job_manager.own_jobs_by_machine)
+    app.state.machine_manager = machine_manager
+
+    def choose_machine(requested: str | None) -> str:
+        """起動する台を決める（他の人の使用・チームの枠・空きメモリの確認を含む。design.md §4）。"""
         try:
-            usage = remote.gpu_usage()
-        except Exception as e:  # ssh 失敗等。確認できないまま起動はしない
-            raise HTTPException(502, f"学習用PCのGPU使用状況を確認できないため起動しません: {e}") from e
-        if settings.max_parallel_jobs > 1 and usage.total_mib and job_manager.get_busy_state()[1] is not None \
-                and usage.free_mib < settings.job_headroom_mib:
-            raise HTTPException(
-                409, f"GPU の空きメモリが足りないため起動しません（空き {usage.free_mib} MiB、必要 {settings.job_headroom_mib:g} MiB）",
-            )
-        threshold = settings.gpu_busy_threshold_mib
-        if usage.other_mib > threshold:
-            raise HTTPException(
-                409,
-                f"学習用PCのGPUを他の人が使用中のため起動しません（自分たち以外で {usage.other_mib} MiB 使用中、"
-                f"しきい値 {threshold:g} MiB）",
-            )
+            return machine_manager.choose(requested)
+        except SelectionError as e:
+            raise HTTPException(e.status_code, e.message) from e
+
+    def required_machine(run: dict, requested: str | None) -> str | None:
+        """引き継ぎ学習は、元の run の重みがある台でしか動かせない。"""
+        parent_id = run.get("parent_run_id")
+        parent = db.get_run(parent_id) if parent_id else None
+        if parent is None:
+            return requested
+        parent_machine = job_manager.machine_of(parent)
+        if requested is not None and requested != parent_machine:
+            raise HTTPException(400, f"引き継ぎ元の run の重みは {parent_machine} にあるため、同じ台でしか起動できません")
+        return parent_machine
 
     # project の検出はリポジトリ全体を走査して main.py を解析するので重い（数十ms）。frontend は数秒ごとに
     # ツリーを取りに来るため、結果を project_scan_interval_sec だけ使い回す。「再スキャン」は即時に探し直す。
@@ -426,11 +432,19 @@ def create_app(
         busy, active = job_manager.get_busy_state()
         return {"busy": busy, "active": active}
 
+    @app.get("/api/machines")
+    async def get_machines(fresh: bool = False) -> dict:
+        """各台の使用状況と、今ジョブを載せてよいか（使えない理由つき）、自動選択される台。"""
+        return await run_in_threadpool(machine_manager.status, fresh)
+
     @app.get("/api/monitor")
-    async def get_monitor() -> dict:
+    async def get_monitor(machine: str | None = None) -> dict:
         """学習用PCの GPU・CPU（コアごと）の使用率。画面のモニタのパネルを開いている間だけ呼ばれる。"""
+        name = machine or registry.default_name
+        if name not in registry.names:
+            raise HTTPException(400, f"未登録のマシンです: {name}")
         try:
-            return await run_in_threadpool(remote.monitor)
+            return await run_in_threadpool(registry.get(name).monitor)
         except RemoteError as e:
             raise HTTPException(502, f"学習用PCの使用状況を取得できません: {e}") from e
 
@@ -587,18 +601,15 @@ def create_app(
         return Response(status_code=204)
 
     @app.post("/api/runs/{run_id}/start")
-    async def start_run(run_id: str) -> dict:
+    async def start_run(run_id: str, machine: str | None = None) -> dict:
         run = db.get_run(run_id)
         if run is None:
             raise HTTPException(404, "run が見つかりません")
         if run["status"] != "draft":
             raise HTTPException(409, "draftではないrunは開始できません")
-        busy, _active = job_manager.get_busy_state()
-        if busy:
-            raise HTTPException(409, "GPUを使用中の別のジョブがあります")
-        await run_in_threadpool(check_gpu_free)
+        chosen = await run_in_threadpool(choose_machine, required_machine(run, machine))
         try:
-            await run_in_threadpool(job_manager.start_train, run_id)
+            await run_in_threadpool(job_manager.start_train, run_id, chosen)
         except JobBusyError as e:
             raise HTTPException(409, str(e)) from e
         return _run_detail(db, db.get_run(run_id))
@@ -629,7 +640,7 @@ def create_app(
         db.delete_run(run_id)
         code_snapshot.delete_ref(settings.repo_root, run_id)
         try:
-            remote.remove_run_files(run_id)  # 学習用PCの重み・ログ。繋がらなくても run の削除は成功させる
+            registry.get(job_manager.machine_of(run)).remove_run_files(run_id)  # 学習用PCの重み・ログ。繋がらなくても run の削除は成功させる
         except Exception:  # noqa: BLE001
             pass
         return Response(status_code=204)
@@ -659,10 +670,7 @@ def create_app(
                 config_toml = set_value(config_toml, key.strip(), literal.strip(), add_missing=True)
             except TomlValidationError as e:
                 raise HTTPException(400, str(e)) from e
-        busy, _active = job_manager.get_busy_state()
-        if busy:
-            raise HTTPException(409, "GPUを使用中の別のジョブがあります")
-        await run_in_threadpool(check_gpu_free)
+        await run_in_threadpool(choose_machine, job_manager.machine_of(target))  # 重みはその run を学習した台にある
         try:
             job = await run_in_threadpool(job_manager.start_infer, target["run_id"], body.project, config_toml)
         except JobBusyError as e:
