@@ -9,6 +9,7 @@ import { ResultTable } from './ResultTable';
 import { PanelSections } from './PanelSections';
 import type { PanelItem } from './PanelSections';
 import { copyText } from '../copyText';
+import { usePersistentState } from '../hooks/usePersistentState';
 
 interface RunMeta {
   project: string;
@@ -38,6 +39,8 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
   const plotsRef = useRef<Record<string, Plot[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // 継続学習の run を、元の run の続きとしてつないで描くか（オフなら、それぞれの run を 0 から描く）
+  const [connectContinued, setConnectContinued] = usePersistentState<boolean>('connectContinued', false);
 
   const runMetaMap = useMemo(() => {
     const map: Record<string, RunMeta> = {};
@@ -48,6 +51,24 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
   }, [tree]);
 
   const key = runIds.slice().sort().join(',');
+
+  // 各 run が引き継いだ元の run（古い順）。ツリーに無い・輪になる場合はそこで止める
+  const ancestorsOf = useMemo(() => {
+    const parentOf: Record<string, string | null> = {};
+    tree.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => { parentOf[r.run_id] = r.parent_run_id; })));
+    const out: Record<string, string[]> = {};
+    Object.keys(parentOf).forEach((id) => {
+      const chain: string[] = [];
+      let cur = parentOf[id];
+      while (cur && cur in parentOf && !chain.includes(cur) && cur !== id) {
+        chain.unshift(cur);
+        cur = parentOf[cur];
+      }
+      out[id] = chain;
+    });
+    return out;
+  }, [tree]);
+  const hasContinued = runIds.some((id) => (ancestorsOf[id] ?? []).length > 0);
 
   // 学習中・infer 中の run だけ3秒ごとに取り直し、それ以外は最初に1回取ったら IDLE_REFRESH_MS ごとに確認するだけにする。
   // 読み込みループの中から最新の値を見るため ref に持つ
@@ -156,7 +177,7 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
         });
         // 見出しの title は PlotChart と同じく updated_at が最新の定義のもの
         const latest = entries.map((e) => e.plot).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
-        return { label: l.label, subtitle: latest?.title, content: <PlotChart entries={entries} /> };
+        return { label: l.label, subtitle: latest?.title, content: <PlotChart entries={entries} ancestors={connectContinued ? ancestorsOf : undefined} /> };
       }
       if (l.kind === 'table') {
         return {
@@ -241,6 +262,15 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
         >
           {copied ? 'コピーしました' : `run_id をコピー（${runIds.length}件）`}
         </button>
+        {hasContinued && (
+          <button
+            className={`label-chip${connectContinued ? ' on' : ''}`}
+            title="継続学習の run を、元の run の続きとしてつないで折れ線を描く（x を元の run の最後からずらす）。オフなら各 run を 0 から描く"
+            onClick={() => setConnectContinued(!connectContinued)}
+          >
+            継続学習をつなぐ
+          </button>
+        )}
         {labels.map((l) => {
           const on = selectedLabels[l.label] ?? true;
           return (

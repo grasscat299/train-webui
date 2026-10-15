@@ -30,6 +30,32 @@ export function mergePlots(prev: Plot[] | undefined, next: Plot[]): Plot[] {
   });
 }
 
+type Seg = { name: string; points: [number, number][]; total_points: number; downsampled?: boolean };
+
+// 継続学習の元の run から順に並べた区間（古い順）を、x をずらして1本につなぐ。同じ名前の系列どうしをつなぐ。
+// 継続学習は x（step・epoch）が 0 や 1 から数え直しになるので、直前の区間の最大の x の続きになるようにずらす。
+// binned（平均した x は区間の終わりの値で、直前の最大値の続きからそのまま始まる）と、
+// そうでない生の点（最初の x が 0 なら最大値の次、1 なら最大値の次の1…）で、ずらし方が違う。
+export function joinSegments(segs: Seg[][], binned: boolean): Seg[] {
+  const names: string[] = [];
+  segs.forEach((seg) => seg.forEach((s) => { if (!names.includes(s.name)) names.push(s.name); }));
+  const out = new Map<string, Seg>(names.map((n) => [n, { name: n, points: [], total_points: 0, downsampled: false }]));
+  let prevMax: number | null = null;
+  for (const seg of segs) {
+    const xs = seg.flatMap((s) => s.points.map(([x]) => x));
+    if (xs.length === 0) continue;
+    const offset: number = prevMax === null ? 0 : binned ? prevMax : prevMax - Math.min(...xs) + 1;
+    seg.forEach((s) => {
+      const o = out.get(s.name)!;
+      o.points.push(...s.points.map(([x, y]): [number, number] => [x + offset, y]));
+      o.total_points += s.total_points;
+      o.downsampled = o.downsampled || !!s.downsampled;
+    });
+    prevMax = Math.max(...xs) + offset;
+  }
+  return [...out.values()];
+}
+
 // 軸の定義として比較する項目（design.md §9）
 function defKey(p: Plot): string {
   return JSON.stringify([p.kind, p.title, p.xlabel, p.ylabel, p.xscale, p.yscale, p.xlim, p.ylim]);
@@ -37,7 +63,12 @@ function defKey(p: Plot): string {
 
 // 軸つきグラフ（design.md §5.3, §9）。比較対象runの同じラベルの全系列を1つの軸に重ねる。
 // 見出し（ラベル・title）はパネル側（PanelSections）で出すので、ここでは注記とグラフだけ描く。
-export function PlotChart({ entries }: { entries: PlotEntry[] }) {
+// ancestors: run_id → その run が引き継いだ元の run（古い順）。渡された run は、元の run の続きとしてつないで描く
+function isLineChain(entries: PlotEntry[], ancestors?: Record<string, string[]>): boolean {
+  return entries.length > 0 && entries[0].plot.kind === 'line' && !!ancestors && entries.some((e) => (ancestors[e.runId] ?? []).length > 0);
+}
+
+export function PlotChart({ entries, ancestors }: { entries: PlotEntry[]; ancestors?: Record<string, string[]> }) {
   // 画面上で切り替えた軸のスケール。null なら define_plot で送られた定義に従う
   const [xOverride, setXOverride] = useState<AxisScale | null>(null);
   const [yOverride, setYOverride] = useState<AxisScale | null>(null);
@@ -52,7 +83,14 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
   const bin = avgMode === 'epoch' ? 'epoch' : avgWidth;
   const binValid = avgMode === 'epoch' || Number(avgWidth) > 0;
   const runKey = entries.map((e) => e.runId).join(',');
+  // 平均の取得・つなぐための元の run の取得は、元の run も含めた run_id で行う
+  const fetchIds = [...new Set(runKey.split(',').flatMap((id) => [...(ancestors?.[id] ?? []), id]))];
+  const fetchKey = fetchIds.join(',');
+  const ancKey = [...new Set(runKey.split(',').flatMap((id) => ancestors?.[id] ?? []))].join(',');
+  const connected = isLineChain(entries, ancestors);
   const [binned, setBinned] = useState<Record<string, BinnedPlot>>({});
+  // 平均なしでつなぐときの、元の run の点（元の run は終わっているので1回取るだけ）
+  const [ancPlots, setAncPlots] = useState<Record<string, Plot | undefined>>({});
   const [binError, setBinError] = useState<string | null>(null);
   const isLine = entries.length > 0 && entries[0].plot.kind === 'line';
   const averaging = isLine && avgMode !== 'none' && binValid;
@@ -68,11 +106,20 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
     let timer: number | undefined;
     const load = async () => {
       try {
+        // 元の run にそのラベルが無い（古い run など）ときは、その分だけ飛ばす。表示中の run のエラーはそのまま出す
+        const own = new Set(runKey.split(','));
         const got = await Promise.all(
-          runKey.split(',').map(async (id) => [id, await api.getBinnedPlot(id, label, bin)] as const),
+          fetchIds.map(async (id) => {
+            try {
+              return [id, await api.getBinnedPlot(id, label, bin)] as const;
+            } catch (e) {
+              if (own.has(id)) throw e;
+              return [id, undefined] as const;
+            }
+          }),
         );
         if (cancelled) return;
-        setBinned(Object.fromEntries(got));
+        setBinned(Object.fromEntries(got.filter((g): g is readonly [string, BinnedPlot] => g[1] !== undefined)));
         setBinError(null);
       } catch (e) {
         if (!cancelled) {
@@ -88,7 +135,19 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [averaging, runKey, label, bin]);
+  }, [averaging, fetchKey, label, bin]);
+
+  useEffect(() => {
+    if (averaging || !connected || ancKey === '') {
+      setAncPlots({});
+      return;
+    }
+    let cancelled = false;
+    Promise.all(ancKey.split(',').map(async (id) => [id, (await api.getPlots(id)).find((p) => p.label === label)] as const))
+      .then((got) => { if (!cancelled) setAncPlots(Object.fromEntries(got)); })
+      .catch(() => { if (!cancelled) setAncPlots({}); });
+    return () => { cancelled = true; };
+  }, [averaging, connected, ancKey, label]);
 
   if (entries.length === 0) return <div className="no-image">データなし</div>;
 
@@ -104,8 +163,18 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
   const binnedActive = averaging && Object.keys(binned).length > 0;
   // 平均で表示する設定のときは、平均が届くまで間引いた点を見せない（一瞬でも別の値が出て紛らわしいため）
   const waitingBinned = averaging && !binnedActive && !binError;
+  // その run の系列。つなぐ設定なら、元の run の分を前に足す
+  const seriesOf = (e: PlotEntry): Seg[] => {
+    const chain = connected ? ancestors?.[e.runId] ?? [] : [];
+    if (binnedActive) {
+      if (chain.length === 0) return binned[e.runId]?.series ?? [];
+      return joinSegments([...chain, e.runId].flatMap((id) => (binned[id] ? [binned[id].series] : [])), true);
+    }
+    if (chain.length === 0) return e.plot.series;
+    return joinSegments([...chain.flatMap((id) => (ancPlots[id] ? [ancPlots[id]!.series] : [])), e.plot.series], false);
+  };
   const lines = entries.flatMap((e) =>
-    waitingBinned ? [] : (binnedActive ? binned[e.runId]?.series ?? [] : e.plot.series).map((s) => {
+    waitingBinned ? [] : seriesOf(e).map((s) => {
       const visible = s.points.filter(
         ([x, y]) => !(xscale === 'log' && x <= 0) && !(yscale === 'log' && y <= 0),
       );
@@ -121,6 +190,7 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
     const w = Object.values(binned)[0];
     notes.push(w.epoch ? `epoch ごとの平均（${w.width} step）` : `x を ${w.width} ごとにした平均`);
   }
+  if (connected && ancKey !== '') notes.push('継続学習を、元の run の続きとしてつないで表示中');
   if (waitingBinned) notes.push('epoch ごとの平均を取得中…');
   if (binError) notes.push(`平均を出せません: ${binError}`);
   // 平均中の x は定義の範囲・ラベルとは単位が違うことがある（epoch 番号など）ので、範囲指定は使わない
