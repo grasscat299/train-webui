@@ -102,8 +102,10 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
   let hiddenOnLog = 0;
   const notes: string[] = [];
   const binnedActive = averaging && Object.keys(binned).length > 0;
+  // 平均で表示する設定のときは、平均が届くまで間引いた点を見せない（一瞬でも別の値が出て紛らわしいため）
+  const waitingBinned = averaging && !binnedActive && !binError;
   const lines = entries.flatMap((e) =>
-    (binnedActive ? binned[e.runId]?.series ?? [] : e.plot.series).map((s) => {
+    waitingBinned ? [] : (binnedActive ? binned[e.runId]?.series ?? [] : e.plot.series).map((s) => {
       const visible = s.points.filter(
         ([x, y]) => !(xscale === 'log' && x <= 0) && !(yscale === 'log' && y <= 0),
       );
@@ -119,6 +121,7 @@ export function PlotChart({ entries }: { entries: PlotEntry[] }) {
     const w = Object.values(binned)[0];
     notes.push(w.epoch ? `epoch ごとの平均（${w.width} step）` : `x を ${w.width} ごとにした平均`);
   }
+  if (waitingBinned) notes.push('epoch ごとの平均を取得中…');
   if (binError) notes.push(`平均を出せません: ${binError}`);
   // 平均中の x は定義の範囲・ラベルとは単位が違うことがある（epoch 番号など）ので、範囲指定は使わない
   const xlim = binnedActive ? null : def.xlim;
