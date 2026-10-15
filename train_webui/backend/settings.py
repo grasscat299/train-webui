@@ -26,6 +26,17 @@ class RemoteSettings:
 
 
 @dataclass(frozen=True)
+class SchedulerSettings:
+    """学習用PCの自動選択のルール（machines.py / scheduler.py）。"""
+    # 同じチームが使う台のグループ。他の人が使っていてグループ内に空き（誰も使っていない台）が残らなくなる台は、自分では使わない
+    reserve_groups: tuple[tuple[str, ...], ...] = ()
+    # 他の人の使用が見えなくなってからも、これだけの秒数は使用中とみなす（学習の合間にメモリが空く瞬間があるため）
+    other_grace_sec: float = 300.0
+    # GET /api/machines の結果を使い回す秒数（起動の判定は毎回測り直す）
+    probe_ttl_sec: float = 5.0
+
+
+@dataclass(frozen=True)
 class ServerSettings:
     host: str
     port: int
@@ -54,6 +65,11 @@ class Settings:
     # 名前 → 接続情報。1台構成（旧 [remote]）のときは {"default": remote}
     machines: dict[str, RemoteSettings] = field(default_factory=dict)
     default_machine: str = "default"
+    scheduler: SchedulerSettings = field(default_factory=SchedulerSettings)
+
+    def __post_init__(self) -> None:
+        if not self.machines:  # remote だけ渡された場合（テスト等）は、それを唯一のマシンとして扱う
+            object.__setattr__(self, "machines", {self.default_machine: self.remote})
 
     def machine_settings(self, name: str) -> Settings:
         """name のマシンを remote に据えた Settings（RemoteController はこれを渡して作る）。"""
@@ -76,6 +92,19 @@ def parse_machines(raw_remote: dict) -> tuple[dict[str, RemoteSettings], str]:
     return machines, next(iter(machines))
 
 
+def _parse_scheduler(raw: dict, machines: dict[str, RemoteSettings]) -> SchedulerSettings:
+    groups = tuple(tuple(g) for g in raw.get("reserve_groups", []))
+    for g in groups:
+        for name in g:
+            if name not in machines:
+                raise ValueError(f"[scheduler] reserve_groups に未登録のマシン {name!r} があります（登録済み: {', '.join(machines)}）")
+    return SchedulerSettings(
+        reserve_groups=groups,
+        other_grace_sec=float(raw.get("other_grace_sec", 300)),
+        probe_ttl_sec=float(raw.get("probe_ttl_sec", 5)),
+    )
+
+
 def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
     srv = dict(raw["server"])
     srv["db_path"] = repo_root / srv["db_path"]
@@ -95,6 +124,7 @@ def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
         gpu_busy_threshold_mib=float(raw.get("gpu", {}).get("busy_threshold_mib", 1024)),
         max_parallel_jobs=int(raw.get("gpu", {}).get("max_parallel_jobs", 1)),
         job_headroom_mib=float(raw.get("gpu", {}).get("job_headroom_mib", 4096)),
+        scheduler=_parse_scheduler(raw.get("scheduler", {}), machines),
         project_scan_interval_sec=float(raw.get("log", {}).get("project_scan_interval_sec", 30)),
     )
 
