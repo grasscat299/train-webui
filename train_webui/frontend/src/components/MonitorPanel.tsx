@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
-import type { MonitorResp } from '../api';
+import type { MachineInfo, MachinesResp, MonitorResp } from '../api';
 import { usePolling } from '../hooks/usePolling';
 
 const INTERVAL_MS = 2000;
@@ -46,27 +46,44 @@ function Gpus({ data }: { data: MonitorResp }) {
   );
 }
 
-// 学習用PCの GPU・CPU（コアごと）の使用率。このパネルを開いている間だけ（表示している間だけ）2秒ごとに取りに行く
-// （マウントされている間のポーリングなので、別のタブに切り替えれば止まる。タブが裏にある間も止まる）
+// 全台の一覧（GET /api/machines。サーバー側で数秒キャッシュされ、不通の台は何度も測り直さない）。行を押すとその台の詳細を下に出す
+function Overview({ data, selected, onSelect }: { data: MachinesResp; selected: string; onSelect: (name: string) => void }) {
+  const mem = (m: MachineInfo) => {
+    if (!m.reachable || m.total_mib === null || m.free_mib === null) return '-';
+    return `${m.total_mib - m.free_mib} / ${m.total_mib} MiB`;
+  };
+  return (
+    <table className="mon-overview">
+      <thead>
+        <tr><th>台</th><th>GPU メモリ</th><th>他の人</th><th>自分のジョブ</th><th>起動</th></tr>
+      </thead>
+      <tbody>
+        {data.machines.map((m) => (
+          <tr key={m.name} className={m.name === selected ? 'selected' : ''} onClick={() => onSelect(m.name)} style={{ cursor: 'pointer' }}>
+            <td>{m.name}{m.name === data.selected && <span title="いま自動選択される台"> ★</span>}</td>
+            <td>{mem(m)}</td>
+            <td>{m.reachable ? `${m.other_mib} MiB` : '接続不可'}</td>
+            <td>{m.own_jobs}</td>
+            <td title={m.reason ?? undefined}>{m.available ? '可' : `不可（${m.reason ?? ''}）`}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// 学習用PCの GPU・CPU（コアごと）の使用率。このパネルを開いている間だけ取りに行く（別のタブに切り替えれば止まる。
+// タブが裏にある間も止まる）。一覧は5秒ごと、選んだ台の詳細は2秒ごと。開いていない間は何も測らない
 export function MonitorPanel() {
   const [machine, setMachine] = useState('');  // '' = 既定の台
-  const { data: machines } = usePolling(() => api.getMachines(), 10000, []);
-  const { data, error } = usePolling(() => api.getMonitor(machine || null), INTERVAL_MS, [machine]);
+  const { data: machines } = usePolling(() => api.getMachines(), 5000, []);
+  const current = machine || machines?.default || '';
+  const { data, error } = usePolling(() => api.getMonitor(current || null), INTERVAL_MS, [current]);
   return (
     <div className="mon-panel">
-      <h2>
-        学習用PCの使用状況
-        {machines && machines.machines.length > 1 && (
-          <select value={machine || machines.default} onChange={(e) => setMachine(e.target.value)} style={{ marginLeft: 12 }}>
-            {machines.machines.map((m) => (
-              <option key={m.name} value={m.name}>
-                {m.name}
-                {m.other_mib > 0 ? `（他の人 ${m.other_mib} MiB）` : ''}
-              </option>
-            ))}
-          </select>
-        )}
-      </h2>
+      <h2>学習用PCの使用状況</h2>
+      {machines && machines.machines.length > 1 && <Overview data={machines} selected={current} onSelect={setMachine} />}
+      <h3>{current} の詳細</h3>
       {error && <div className="error-banner">{error}</div>}
       {!data && !error && <p className="mon-note">取得中…</p>}
       {data && (

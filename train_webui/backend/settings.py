@@ -34,6 +34,8 @@ class SchedulerSettings:
     other_grace_sec: float = 300.0
     # GET /api/machines の結果を使い回す秒数（起動の判定は毎回測り直す）
     probe_ttl_sec: float = 5.0
+    # つながらなかった台を、画面の更新（起動の判定ではない）で測り直すまでの秒数。不通の台の接続待ちで一覧が遅くならないように
+    unreachable_retry_sec: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,7 @@ def _parse_scheduler(raw: dict, machines: dict[str, RemoteSettings]) -> Schedule
         reserve_groups=groups,
         other_grace_sec=float(raw.get("other_grace_sec", 300)),
         probe_ttl_sec=float(raw.get("probe_ttl_sec", 5)),
+        unreachable_retry_sec=float(raw.get("unreachable_retry_sec", 30)),
     )
 
 

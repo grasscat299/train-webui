@@ -122,3 +122,23 @@ def test_other_use_is_remembered_for_grace_period(tmp_path):
     assert not mm.status()["machines"][0]["available"]  # 猶予の間は使用中のまま
     now[0] = 400.0
     assert mm.status()["machines"][0]["available"]
+
+
+def test_unreachable_machine_is_not_reprobed_by_display_but_is_by_start(tmp_path):
+    from train_webui.backend.machines import MachineManager
+    app, client, fakes = _setup(tmp_path, priorities={"a1": 1}, groups=())
+    settings = dataclasses.replace(app.state.settings, scheduler=SchedulerSettings(probe_ttl_sec=0, unreachable_retry_sec=30.0))
+    calls = []
+    orig = fakes["a1"].gpu_usage
+    fakes["a1"].gpu_usage = lambda: (calls.append(1), orig())[1]
+    now = [0.0]
+    mm = MachineManager(settings, RemoteRegistry(fakes, "a1"), lambda: {}, clock=lambda: now[0])
+    fakes["a1"].fail_gpu = True
+    assert not mm.status()["machines"][0]["reachable"]
+    now[0] = 5.0
+    mm.status()
+    assert len(calls) == 1               # 画面の更新は30秒間、測り直さない
+    fakes["a1"].fail_gpu = False
+    now[0] = 6.0
+    assert mm.choose() == "a1"           # 起動の判定は測り直すので、復旧をすぐ拾う
+    assert len(calls) == 2
