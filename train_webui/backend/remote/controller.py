@@ -162,6 +162,17 @@ class RemoteController:
         self._check(proc, "CPU/GPU使用状況の確認")
         return parse_monitor(proc.stdout.decode("utf-8", errors="replace"))
 
+    def monitor(self) -> dict:
+        # /proc/stat を 0.5 秒あけて2回読み、差分からコアごとの使用率を出す。GPU は nvidia-smi を1回
+        cmd = (
+            "cat /proc/stat; echo ---; sleep 0.5; cat /proc/stat; echo ---; "
+            "nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw "
+            "--format=csv,noheader,nounits 2>/dev/null; true"
+        )
+        proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
+        self._check(proc, "CPU/GPU使用状況の確認")
+        return parse_monitor(proc.stdout.decode("utf-8", errors="replace"))
+
     # ------------------------------------------------------------------
     # ssh/rsync コマンド組み立て
     # ------------------------------------------------------------------
