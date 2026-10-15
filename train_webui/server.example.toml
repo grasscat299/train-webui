@@ -31,6 +31,12 @@ lost_after_sec = 180                       # CLI起動runのheartbeatがこの�
 # 学習開始・[infer] の前に学習用PCのGPUを確認し、自分たち以外（他の人）がこのMiB数より多くGPUメモリを
 # 使っていたら起動しない（design.md §4）。省略時 1024。
 busy_threshold_mib = 1024
+# 同時に動かせるジョブ（学習・推論）の数。省略時 1（排他）。2 以上にすると、ジョブごとにコードを複製
+# （<run_root>/<run_id>/<job_id>/code）して動かし、起動前に GPU の空きメモリ（job_headroom_mib 以上）も確認する。
+# 変えたら server の再起動が必要（動いているジョブは再起動しても続く）。
+# 目安は `venv/bin/python -m auto_loop.resources` が出す。
+# max_parallel_jobs = 1
+# job_headroom_mib  = 4096
 
 [sync]
 # コードrsync（design.md §4.5）で除外するパス（rsyncの --exclude パターン）。

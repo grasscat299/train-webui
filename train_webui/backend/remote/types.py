@@ -44,6 +44,11 @@ class JobState:
 class GpuUsage:
     total_used_mib: int  # nvidia-smi の GPU 全体の使用メモリ（コンテナの外のプロセスも含む。複数GPUなら合計）
     own_mib: int         # そのうち、コンテナ内から見える（= 自分たちの）プロセスが使っているメモリ
+    total_mib: int = 0   # GPU の全メモリ（複数GPUなら合計）。0 = 不明（空きメモリの確認は飛ばす）
+
+    @property
+    def free_mib(self) -> int:
+        return max(self.total_mib - self.total_used_mib, 0)
 
     @property
     def other_mib(self) -> int:

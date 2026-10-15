@@ -27,3 +27,10 @@ def test_gpu_usage_ssh_failure_raises(settings_factory):
     runner = FakeRunner(responses=[fail(stderr=b"nvidia-smi: command not found")])
     with pytest.raises(RemoteError):
         RemoteController(settings_factory(), runner=runner).gpu_usage()
+
+
+def test_gpu_usage_reads_total_memory_when_present(settings_factory):
+    stdout = b"6011\n---\n1457, 5962\n---\n 1457\n---\n32607\n"
+    runner = FakeRunner(responses=[ok(stdout=stdout)])
+    usage = RemoteController(settings_factory(), runner=runner).gpu_usage()
+    assert (usage.total_used_mib, usage.total_mib, usage.free_mib) == (6011, 32607, 26596)

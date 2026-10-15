@@ -454,6 +454,11 @@ class Database:
             row = conn.execute("SELECT * FROM jobs WHERE status = 'running' LIMIT 1").fetchone()
         return dict(row) if row else None
 
+    def list_running_jobs(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM jobs WHERE status = 'running'").fetchall()
+        return [dict(r) for r in rows]
+
     def get_running_job_for_run(self, run_id: str) -> dict | None:
         with self._connect() as conn:
             row = conn.execute(
