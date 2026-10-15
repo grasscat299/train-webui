@@ -22,6 +22,7 @@ _RSYNC_TIMEOUT_SEC = 300.0
 _GIT_TIMEOUT_SEC = 15.0
 _MAX_UNTRACKED_BYTES = 1024 * 1024
 _STDERR_TAIL_CHARS = 2000
+_CONTROL_PATH = "/tmp/train_webui_ssh_%C"  # unix socket のパスは長さに上限があるので短く
 _BINARY_SNIFF_BYTES = 8000  # 先頭何バイトでNUL文字を見てバイナリ判定するか
 
 
@@ -177,17 +178,23 @@ class RemoteController:
     # ssh/rsync コマンド組み立て
     # ------------------------------------------------------------------
 
-    def _ssh_base_args(self) -> list[str]:
+    def _ssh_options(self) -> list[str]:
+        """ssh の共通オプション。ControlMaster で1本の接続を使い回す（モニタ・ポーリング・rsync のたびに
+        接続・認証をやり直さない）。%C は接続先の hash なので、台ごとに別の接続になる。"""
         r = self._settings.remote
         return [
-            "ssh", "-p", str(r.port), "-i", os.path.expanduser(r.key_path),
-            "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", f"{r.user}@{r.host}",
+            "-p", str(r.port), "-i", os.path.expanduser(r.key_path),
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+            "-o", "ControlMaster=auto", "-o", "ControlPersist=10m",
+            "-o", f"ControlPath={_CONTROL_PATH}",
         ]
 
-    def _ssh_dash_e(self) -> str:
+    def _ssh_base_args(self) -> list[str]:
         r = self._settings.remote
-        key = shlex.quote(os.path.expanduser(r.key_path))
-        return f"ssh -p {r.port} -i {key} -o BatchMode=yes -o ConnectTimeout=10"
+        return ["ssh", *self._ssh_options(), f"{r.user}@{r.host}"]
+
+    def _ssh_dash_e(self) -> str:
+        return shlex.join(["ssh", *self._ssh_options()])
 
     def _build_launch_command(self, spec: LaunchSpec, job_dir: str, code_dir: str | None = None) -> str:
         r = self._settings.remote
