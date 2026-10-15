@@ -518,6 +518,14 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def results_signature(self, run_id: str) -> tuple:
+        """その run の results が変わったかを見る印。件数・最大id・画像パスが入った件数（画像は作成後にパスが入る）。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*), MAX(id), COUNT(image_path) FROM results WHERE run_id = ?", (run_id,),
+            ).fetchone()
+        return tuple(row)
+
     def result_label_kind(self, run_id: str, label: str) -> str | None:
         """その run で label が metric/image として使われていればその kind を返す。"""
         with self._connect() as conn:

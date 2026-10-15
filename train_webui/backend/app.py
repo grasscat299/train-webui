@@ -315,6 +315,33 @@ def _build_draft_config(db: Database, settings: Settings, project: str, group: s
     return base
 
 
+class _ResponseCache:
+    """同じ問い合わせの結果を、元のデータが変わらない間だけ使い回す小さな LRU。
+
+    画面は Result を開いている間、選んだ run ごとに数秒おきに results・plots・平均を全部取り直す。
+    1回は速くても重なると server の CPU を使い切って他の応答まで遅くなるため、
+    データが変わっていなければ前回の結果をそのまま返す。
+    """
+
+    def __init__(self, max_entries: int = 64) -> None:
+        self._max = max_entries
+        self._data: dict = {}
+        self._lock = threading.Lock()
+
+    def get_or_compute(self, key, signature, compute):
+        with self._lock:
+            hit = self._data.get(key)
+            if hit is not None and hit[0] == signature:
+                self._data[key] = self._data.pop(key)  # 使った順に並べ直す
+                return hit[1]
+        value = compute()
+        with self._lock:
+            self._data[key] = (signature, value)
+            while len(self._data) > self._max:
+                self._data.pop(next(iter(self._data)))
+        return value
+
+
 def create_app(
     settings: Settings,
     remote: RemoteControllerProtocol | None = None,
@@ -328,6 +355,7 @@ def create_app(
 
     settings.server.media_dir.mkdir(parents=True, exist_ok=True)
     db = Database(settings.server.db_path)
+    cache = _ResponseCache()
     db.init_schema()
     snapshot_kwargs: dict = {}
     if real_remote:  # テストの偽 remote では、リポジトリが git とは限らないのでコードの記録・復元をしない
@@ -657,7 +685,10 @@ def create_app(
         run = db.get_run(run_id)
         if run is None:
             raise HTTPException(404, "run が見つかりません")
-        return [_result_public(r) for r in db.list_results(run_id, kind=kind, label=label)]
+        return cache.get_or_compute(
+            ("results", run_id, kind, label), db.results_signature(run_id),
+            lambda: [_result_public(r) for r in db.list_results(run_id, kind=kind, label=label)],
+        )
 
     @app.get("/api/runs/{run_id}/plots")
     def get_plots(run_id: str, label: str | None = None, after_id: int | None = None,
@@ -666,7 +697,13 @@ def create_app(
         if run is None:
             raise HTTPException(404, "run が見つかりません")
         upto = db.max_plot_point_id(run_id) or 0
-        return [_plot_public(db, row, after_id, max_points, upto) for row in db.list_plots(run_id, label=label)]
+        rows = db.list_plots(run_id, label=label)
+        # 点が増えなくても軸の定義（種類・軸名など。updated_at は秒単位で当てにならない）が変わりうるので、行の中身を印に入れる
+        signature = (upto, tuple(tuple(r.values()) for r in rows))
+        return cache.get_or_compute(
+            ("plots", run_id, label, after_id, max_points), signature,
+            lambda: [_plot_public(db, row, after_id, max_points, upto) for row in rows],
+        )
 
     @app.get("/api/runs/{run_id}/plots/binned")
     def get_binned_plot(run_id: str, label: str, bin: str = "epoch") -> dict:
@@ -697,13 +734,17 @@ def create_app(
                 raise HTTPException(400, "bin は \"epoch\" か正の数にしてください")
             to_x = lambda k: (k + 1) * width  # noqa: E731 - 区間の終わり
         upto = db.max_plot_point_id(run_id) or 0
-        series = []
-        for stat in db.list_plot_series_stats(run_id, label, upto):
-            pts = db.list_plot_points(run_id, label, stat["series"], upto)
-            bins = binning.bin_mean(pts, width)
-            series.append({"name": stat["series"], "points": [[to_x(k), mean] for k, mean, _n in bins],
-                           "total_points": stat["total"]})
-        return {"label": label, "bin": bin, "width": width, "epoch": bin == "epoch", "series": series}
+
+        def compute() -> dict:
+            series = []
+            for stat in db.list_plot_series_stats(run_id, label, upto):
+                pts = db.list_plot_points(run_id, label, stat["series"], upto)
+                bins = binning.bin_mean(pts, width)
+                series.append({"name": stat["series"], "points": [[to_x(k), mean] for k, mean, _n in bins],
+                               "total_points": stat["total"]})
+            return {"label": label, "bin": bin, "width": width, "epoch": bin == "epoch", "series": series}
+
+        return cache.get_or_compute(("binned", run_id, label, bin, width), upto, compute)
 
     @app.get("/api/labels")
     def get_labels(run_ids: str = "") -> list[dict]:
