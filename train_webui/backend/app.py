@@ -755,8 +755,7 @@ def create_app(
         def build() -> dict:
             series = []
             for stat in db.list_plot_series_stats(run_id, label, upto):
-                pts = db.list_plot_points(run_id, label, stat["series"], upto)
-                bins = binning.bin_mean(pts, width)
+                bins = db.list_plot_bins(run_id, label, stat["series"], upto, width)  # SQLite 内で集計（Python に全点を持ち出さない）
                 series.append({"name": stat["series"], "points": [[to_x(k), mean] for k, mean, _n in bins],
                                "total_points": stat["total"]})
             return {"label": label, "bin": bin, "width": width, "epoch": bin == "epoch", "series": series}
