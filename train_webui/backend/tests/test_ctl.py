@@ -64,3 +64,16 @@ def test_draft_set_comment_flow(app_factory, capsys):
         ctl.cmd_set(api, argparse.Namespace(run_id=run_id, assignments=["nope.key=1"]))
     with pytest.raises(ctl.CtlError):
         ctl.cmd_set(api, argparse.Namespace(run_id=run_id, assignments=["no_equal"]))
+
+
+def test_set_add_creates_missing_key_only_with_flag(app_factory):
+    import argparse
+
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "proj_a")
+    api = _FakeApi(TestClient(app))
+    run_id = api.call("POST", "/api/runs/draft", {"project": "proj_a", "group": "g1", "new_group": True})["run_id"]
+    with pytest.raises(ctl.CtlError):  # 既定では新しいキーを足せない（タイプミスの防止）
+        ctl.cmd_set(api, argparse.Namespace(run_id=run_id, assignments=["wandb.newkey=1"]))
+    ctl.cmd_set(api, argparse.Namespace(run_id=run_id, assignments=["wandb.newkey=1"], add=True))
+    assert "newkey = 1" in api.call("GET", f"/api/runs/{run_id}")["config_toml"]

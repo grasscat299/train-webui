@@ -4,7 +4,7 @@
 server が起動している必要がある。リポジトリ直下から実行する:
 
     venv/bin/python -m train_webui.ctl draft <project> [--group G | --new-group] [--name N] [--continue-from RUN_ID | --rerun-of RUN_ID]
-    venv/bin/python -m train_webui.ctl set <run_id> section.key=<TOMLリテラル> [...]
+    venv/bin/python -m train_webui.ctl set <run_id> [--add] section.key=<TOMLリテラル> [...]
     venv/bin/python -m train_webui.ctl describe <project> <group> (--file パス | --text 文章 | 標準入力)
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
     venv/bin/python -m train_webui.ctl start <run_id>
@@ -14,7 +14,7 @@ server が起動している必要がある。リポジトリ直下から実行�
 - `describe` は group（=モデル構成）の説明（Markdown）を上書きする。group は group_id でも表示名でもよい。
   モデルの作りを Claude が後から読めるようにするためのもの。新しいモデルを作ったら書く。
 - `draft` は新しい下書き run を作って run_id を出す（config は WebUI の「新規 run」と同じ作り方）。
-- `set` は draft の config の既存キーの値だけを書き換える（`train.lr=3e-4` `train.name="a"` `train.use_x=true`）。
+- `set` は draft の config の既存キーの値だけを書き換える（`train.lr=3e-4` `train.name="a"` `train.use_x=true`）。`--add` を付けると無いキーを section の中に足す。
   値は TOML のリテラルなので、文字列は引用符で囲む。
 - `infer --set` はその推論ジョブに渡す config だけを書き換える（run に保存された config は変えない）。
   無いキーは section の中に足す（例: `--set 'infer.mode="eval"' --set infer.eval_n=200`）。
@@ -83,7 +83,7 @@ def cmd_set(api: Api, args: argparse.Namespace) -> None:
         if not eq:
             raise CtlError(f"`section.key=値` の形で指定してください: {assignment!r}")
         try:
-            text = set_value(text, key.strip(), literal.strip())
+            text = set_value(text, key.strip(), literal.strip(), add_missing=getattr(args, "add", False))
         except TomlValidationError as e:
             raise CtlError(str(e)) from e
     updated = api.call("PUT", f"/api/runs/{args.run_id}/config", {"config_toml": text})
@@ -149,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("set", help="draft の config のキーを書き換える")
     s.add_argument("run_id")
     s.add_argument("assignments", nargs="+", metavar="section.key=値")
+    s.add_argument("--add", action="store_true", help="config に無いキーを section の中に足す（既定は既存のキーだけ。タイプミスの防止）")
     s.set_defaults(func=cmd_set)
 
     s = sub.add_parser("describe", help="group（モデル構成）の説明（Markdown）を書く")
