@@ -16,6 +16,11 @@ python           = "python3"                          # コンテナ内のpython
 run_root         = "/home/user/train_webui_runs"  # run.log / run.pid / run.exit（repo_dirの外）
 stop_timeout_sec = 10                                 # SIGTERM後、SIGKILLまで待つ秒数
 
+# 複数台のときの自動選択のルール（design.md §1.7）。1台なら不要
+# [scheduler]
+# reserve_groups = [["gpu1", "gpu5"], ["gpu2", "gpu4"]]   # 同じチームが使う台。グループ内に誰も使っていない台を1台残す
+# other_grace_sec = 300                                       # 他の人の使用が見えなくなってから、使用中とみなし続ける秒数
+
 [server]                                   # ローカルPC(WSL)のWebUI server
 host       = "0.0.0.0"
 port       = 8000

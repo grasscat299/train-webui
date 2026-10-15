@@ -100,6 +100,17 @@ WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマ�
 - instance は明示的に止めるか学習用PCが再起動するまで動き続ける。止まった場合は実行中のジョブも
   止まる（WebUI上は `run.exit` が無いので failed になる）。
 
+## 1.7 学習用PCが複数台あるとき
+`server.toml` の `[remote.defaults]`（共通値）と `[remote.<名前>]`（台ごと。`host` と `priority` など）で登録する。最初に書いた台が既定のマシン（`machine` 列が NULL の古い run はここで動いたものとして扱う）。`[remote]` に `host` を直に書く旧形式も、`default` という1台として読める。
+
+- **台の記録**: `runs.machine` / `jobs.machine`。stop・ログ取得・生存確認・run の削除・推論は、その run を動かした台に対して行う（重みはその台の `run_root` にあるため、推論と引き継ぎ学習は台を選べない）。
+- **自動選択**（`scheduler.py` が規則、`machines.py` が測定。起動のたびに全台の GPU を測り直す）。共用の台なので、次を満たす台だけを候補にする。
+  - つながる。他の人が使っていない（自分たち以外の GPU メモリ > `gpu.busy_threshold_mib`。見えなくなってから `scheduler.other_grace_sec` 秒は使用中とみなす）。自分のジョブで満杯でない（`gpu.max_parallel_jobs`）。
+  - 予約グループ（`scheduler.reserve_groups`。例 `[["gpu1","gpu5"],["gpu2","gpu4"]]`）では、自分が新しく台を使い始めた後も、誰も使っていない台がグループ内に1台残る。つながらない台は空きに数えない。同じ台に自分のジョブをもう1本載せるのは枠を増やさない。
+  - 候補の中では `priority` の大きい順（5090 の gpu1 を最優先にする）。候補が無ければ409（全台が不通なら502）で、台ごとの理由を返す。
+- 起動時に台を指定してもルールは適用される（`POST /api/runs/{id}/start?machine=`、`ctl start --machine`）。ルールを変えるときは `server.toml` の `[scheduler]` と `priority` を書き換える。
+- 画面: 下書きの「学習開始」の横で台を選べる（既定は「自動」）。モニタのタブでも台を切り替えられる。
+
 ## 2. プロジェクト検出
 
 - 探索範囲は `td_plan` リポジトリ全体（`venv/` `.git/` `__pycache__/` `wandb/` `train_webui/` 自身
