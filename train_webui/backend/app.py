@@ -327,6 +327,9 @@ class _ResponseCache:
         self._max = max_entries
         self._data: dict = {}
         self._lock = threading.Lock()
+        # 数万行を読む計算を複数スレッドで同時に走らせると、sqlite の行取得のたびに GIL の取り合いになって
+        # 1本ずつなら0.3秒のものが数十秒に伸びる（初回表示で全 run を一斉に取る時）。重い計算は1つずつ行う
+        self._compute_lock = threading.Lock()
 
     def get_or_compute(self, key, signature, compute):
         with self._lock:
@@ -334,7 +337,12 @@ class _ResponseCache:
             if hit is not None and hit[0] == signature:
                 self._data[key] = self._data.pop(key)  # 使った順に並べ直す
                 return hit[1]
-        value = compute()
+        with self._compute_lock:
+            with self._lock:  # 待っている間に別のリクエストが同じものを作り終えていれば、それを使う
+                hit = self._data.get(key)
+                if hit is not None and hit[0] == signature:
+                    return hit[1]
+            value = compute()
         with self._lock:
             self._data[key] = (signature, value)
             while len(self._data) > self._max:
@@ -753,8 +761,7 @@ def create_app(
         def compute() -> dict:
             series = []
             for stat in db.list_plot_series_stats(run_id, label, upto):
-                pts = db.list_plot_points(run_id, label, stat["series"], upto)
-                bins = binning.bin_mean(pts, width)
+                bins = db.list_plot_bins(run_id, label, stat["series"], upto, width)
                 series.append({"name": stat["series"], "points": [[to_x(k), mean] for k, mean, _n in bins],
                                "total_points": stat["total"]})
             return {"label": label, "bin": bin, "width": width, "epoch": bin == "epoch", "series": series}

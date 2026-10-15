@@ -580,6 +580,18 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_plot_bins(self, run_id: str, label: str, series: str, upto: int, width: float) -> list[tuple]:
+        """x を width ごとの区間 [k*width, (k+1)*width) に分けた (k, y の平均, 点数) を k の昇順で返す。
+        集計を SQLite の中で行うので、数万点の行を Python に取り込まない（binning.bin_mean と同じ結果）。"""
+        floor = "(CAST(x / :w AS INTEGER) - (x / :w < CAST(x / :w AS INTEGER)))"  # SQLite に floor が無い場合があるので手で
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT {floor} AS k, AVG(y) AS m, COUNT(*) AS n FROM plot_points "
+                "WHERE run_id = :r AND label = :l AND series = :s AND id <= :u GROUP BY k ORDER BY k ASC",
+                {"w": float(width), "r": run_id, "l": label, "s": series, "u": upto},
+            ).fetchall()
+        return [(int(r["k"]), r["m"], r["n"]) for r in rows]
+
     def list_plot_points(self, run_id: str, label: str, series: str, upto: int,
                          after_id: int | None = None) -> list[tuple]:
         query = "SELECT id, x, y FROM plot_points WHERE run_id = ? AND label = ? AND series = ? AND id <= ?"
