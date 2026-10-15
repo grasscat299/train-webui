@@ -21,6 +21,8 @@ interface RunMeta {
 // Result タブ: チェックONのrunを横断してラベルごとに比較表示する（design.md §9）。
 // 動いていない run の結果を確認し直す間隔（CLI から手で infer した結果などを拾うため、止めはしない）
 const IDLE_REFRESH_MS = 60000;
+// 1ラベルの metric を、画面へ送ってもらう最大の点数（毎 step の値は数万点で、run あたり数MBになるため）
+const RESULT_MAX_POINTS = 1000;
 
 export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSelectedLabels, onLabelState }: {
   runIds: string[];
@@ -114,7 +116,17 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
           });
           return next;
         });
-        const entries = await Promise.all(due.map(async (id) => [id, await api.getResults(id)] as const));
+        // results と plots は互いに待たなくてよいので、同時に取る（順に取ると run が多いほど表示までが長くなる）
+        const [entries, plotEntries] = await Promise.all([
+          Promise.all(due.map(async (id) => [id, await api.getResults(id, undefined, undefined, RESULT_MAX_POINTS)] as const)),
+          Promise.all(due.map(async (id) => {
+            const prev = plotsRef.current[id];
+            // 点のidはrun内で通し番号なので、全ラベルの最大の last_point_id 以降を取れば差分になる
+            const ids = (prev ?? []).map((p) => p.last_point_id).filter((v): v is number => v !== null);
+            const afterId = prev && ids.length > 0 ? Math.max(...ids) : null;
+            return [id, mergePlots(prev, await api.getPlots(id, afterId))] as const;
+          })),
+        ]);
         if (cancelled) return;
         setResultsByRun((prev) => {
           // 比較から外れた run の分は捨て、今回取った run の分だけ置き換える
@@ -124,14 +136,6 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
           });
           return { ...next, ...Object.fromEntries(entries) };
         });
-        const plotEntries = await Promise.all(due.map(async (id) => {
-          const prev = plotsRef.current[id];
-          // 点のidはrun内で通し番号なので、全ラベルの最大の last_point_id 以降を取れば差分になる
-          const ids = (prev ?? []).map((p) => p.last_point_id).filter((v): v is number => v !== null);
-          const afterId = prev && ids.length > 0 ? Math.max(...ids) : null;
-          return [id, mergePlots(prev, await api.getPlots(id, afterId))] as const;
-        }));
-        if (cancelled) return;
         plotsRef.current = { ...plotsRef.current, ...Object.fromEntries(plotEntries) };
         setPlotsByRun(plotsRef.current);
         due.forEach((id) => {

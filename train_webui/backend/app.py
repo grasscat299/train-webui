@@ -681,14 +681,29 @@ def create_app(
         return {"data": text, "offset": new_offset, "done": job["status"] != "running"}
 
     @app.get("/api/runs/{run_id}/results")
-    def get_results(run_id: str, kind: str | None = None, label: str | None = None) -> list[dict]:
+    def get_results(run_id: str, kind: str | None = None, label: str | None = None,
+                    max_points: int | None = Query(None, ge=4)) -> list[dict]:
+        """max_points を付けると、1ラベルの metric が max_points 個を超える分は間引く（折れ線と同じ min/max 方式）。
+        画面は毎 step の値（数万行・run あたり数MB）を全部は描けないので、これで転送量を減らす。"""
         run = db.get_run(run_id)
         if run is None:
             raise HTTPException(404, "run が見つかりません")
-        return cache.get_or_compute(
-            ("results", run_id, kind, label), db.results_signature(run_id),
-            lambda: [_result_public(r) for r in db.list_results(run_id, kind=kind, label=label)],
-        )
+
+        def compute() -> list[dict]:
+            rows = db.list_results(run_id, kind=kind, label=label)
+            if max_points is None:
+                return [_result_public(r) for r in rows]
+            metrics: dict[str, list[dict]] = {}
+            for r in rows:
+                if r["kind"] == "metric":
+                    metrics.setdefault(r["label"], []).append(r)
+            keep: set[int] = set()
+            for rs in metrics.values():
+                pts = [(r["id"], r["step"] if r["step"] is not None else 0, r["value"]) for r in rs]
+                keep.update(i for i, _x, _y in decimate_minmax(pts, max_points))
+            return [_result_public(r) for r in rows if r["kind"] != "metric" or r["id"] in keep]
+
+        return cache.get_or_compute(("results", run_id, kind, label, max_points), db.results_signature(run_id), compute)
 
     @app.get("/api/runs/{run_id}/plots")
     def get_plots(run_id: str, label: str | None = None, after_id: int | None = None,

@@ -224,7 +224,8 @@ export interface Api {
   // その run の重みで推論する（重みが登録された、学習の終わった run だけ）
   runInfer(project: string, runId: string): Promise<Job>;
   getJobLog(jobId: string, offset: number): Promise<JobLogResp>;
-  getResults(runId: string, kind?: 'metric' | 'image' | 'table', label?: string): Promise<Result[]>;
+  // maxPoints を渡すと、1ラベルの metric はそれ以下に間引かれて返る（画面用。無ければ全部）
+  getResults(runId: string, kind?: 'metric' | 'image' | 'table', label?: string, maxPoints?: number): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
   getMonitor(): Promise<MonitorResp>;
   getPlots(runId: string, afterId?: number | null): Promise<Plot[]>;
@@ -311,10 +312,11 @@ const realApi: Api = {
     }),
   getJobLog: (jobId, offset) =>
     request<JobLogResp>(`/api/jobs/${encodeURIComponent(jobId)}/log?offset=${offset}`),
-  getResults: (runId, kind, label) => {
+  getResults: (runId, kind, label, maxPoints) => {
     const params = new URLSearchParams();
     if (kind) params.set('kind', kind);
     if (label) params.set('label', label);
+    if (maxPoints) params.set('max_points', String(maxPoints));
     const qs = params.toString();
     return request<Result[]>(`/api/runs/${encodeURIComponent(runId)}/results${qs ? `?${qs}` : ''}`);
   },

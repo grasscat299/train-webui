@@ -119,3 +119,18 @@ def test_plots_unknown_run_404_and_delete_removes(app_factory):
     assert client.delete(f"/api/runs/{run_id}").status_code == 204
     assert app.state.db.list_plots(run_id) == []
     assert app.state.db.max_plot_point_id(run_id, "infer/xy") is None
+
+
+def test_results_max_points_decimates_only_metrics(app_factory):
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    run_id = _create_cli_run(client)
+    items = [{"kind": "metric", "label": "train/lr", "step": i, "value": float(i % 7), "sent_at": T} for i in range(500)]
+    items.append({"kind": "metric", "label": "few", "step": 0, "value": 1.0, "sent_at": T})
+    assert _post(client, run_id, items).status_code == 204
+    full = client.get(f"/api/runs/{run_id}/results").json()
+    assert len(full) == 501
+    cut = client.get(f"/api/runs/{run_id}/results", params={"max_points": 50}).json()
+    lr = [r for r in cut if r["label"] == "train/lr"]
+    assert len(lr) <= 50 and lr[0]["step"] == 0 and lr[-1]["step"] == 499  # 最初と最後は残る
+    assert len([r for r in cut if r["label"] == "few"]) == 1  # 少ないラベルはそのまま
