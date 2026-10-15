@@ -743,3 +743,7 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
 .mon-fill.high { background: #d9534f; }
 .mon-value { width: 40px; text-align: right; font-variant-numeric: tabular-nums; flex: none; }
 .mon-detail { color: var(--muted); flex: none; }
+
+.mon-overview { border-collapse: collapse; margin: 8px 0 16px; font-size: 13px; }
+.mon-overview th, .mon-overview td { padding: 4px 12px; text-align: left; border-bottom: 1px solid var(--border, #ddd); }
+.mon-overview tr.selected { background: rgba(80, 140, 255, 0.12); }

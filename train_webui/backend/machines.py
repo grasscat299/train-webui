@@ -30,6 +30,7 @@ class MachineManager:
         self._own_jobs = own_jobs  # 台の名前 → 自分のジョブ数
         self._clock = clock
         self._lock = threading.Lock()
+        self._failed_at: dict[str, float] = {}  # 台ごとに、最後に測定に失敗した時刻
         self._last_other_at: dict[str, float] = {}  # 台ごとに、他の人の使用を最後に見た時刻
         self._cache: tuple[float, list[tuple[MachineState, GpuUsage | None]]] | None = None
 
@@ -39,16 +40,22 @@ class MachineManager:
         return Rule(max_parallel_jobs=s.max_parallel_jobs, job_headroom_mib=s.job_headroom_mib,
                     reserve_groups=s.scheduler.reserve_groups)
 
-    def _probe(self, name: str) -> GpuUsage | None:
+    def _probe(self, name: str, fresh: bool) -> GpuUsage | None:
+        failed = self._failed_at.get(name)
+        if not fresh and failed is not None and self._clock() - failed < self._settings.scheduler.unreachable_retry_sec:
+            return None  # 画面の更新では、不通の台に何度も接続しに行かない（起動の判定 = fresh のときだけ測り直す）
         try:
-            return self._registry.get(name).gpu_usage()
+            usage = self._registry.get(name).gpu_usage()
         except Exception:  # noqa: BLE001 - 接続できない台は候補から外すだけ
+            self._failed_at[name] = self._clock()
             return None
+        self._failed_at.pop(name, None)
+        return usage
 
-    def _measure(self) -> list[tuple[MachineState, GpuUsage | None]]:
+    def _measure(self, fresh: bool) -> list[tuple[MachineState, GpuUsage | None]]:
         names = self._registry.names
         with ThreadPoolExecutor(max_workers=len(names)) as pool:
-            usages = list(pool.map(self._probe, names))
+            usages = list(pool.map(lambda n: self._probe(n, fresh), names))
         own = self._own_jobs()
         now = self._clock()
         grace = self._settings.scheduler.other_grace_sec
@@ -71,7 +78,7 @@ class MachineManager:
         with self._lock:
             at = self._cache[0] if self._cache else None
             if fresh or at is None or self._clock() - at >= self._settings.scheduler.probe_ttl_sec:
-                self._cache = (self._clock(), self._measure())
+                self._cache = (self._clock(), self._measure(fresh))
             return self._cache[1]
 
     def status(self, fresh: bool = False) -> dict:
