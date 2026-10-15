@@ -1,0 +1,113 @@
+"""複数の学習用PCの状態を測り、ジョブを載せる台を選ぶ（ルール本体は scheduler.py）。"""
+from __future__ import annotations
+
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable
+
+from .remote.registry import RemoteRegistry
+from .remote.types import GpuUsage
+from .scheduler import MachineState, Rule, evaluate, pick
+from .settings import Settings
+
+
+class SelectionError(Exception):
+    """台を決められない。status_code はそのまま HTTP のステータスにする。"""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+class MachineManager:
+    def __init__(self, settings: Settings, registry: RemoteRegistry,
+                 own_jobs: Callable[[], dict[str, int]],
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self._settings = settings
+        self._registry = registry
+        self._own_jobs = own_jobs  # 台の名前 → 自分のジョブ数
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._last_other_at: dict[str, float] = {}  # 台ごとに、他の人の使用を最後に見た時刻
+        self._cache: tuple[float, list[tuple[MachineState, GpuUsage | None]]] | None = None
+
+    @property
+    def rule(self) -> Rule:
+        s = self._settings
+        return Rule(max_parallel_jobs=s.max_parallel_jobs, job_headroom_mib=s.job_headroom_mib,
+                    reserve_groups=s.scheduler.reserve_groups)
+
+    def _probe(self, name: str) -> GpuUsage | None:
+        try:
+            return self._registry.get(name).gpu_usage()
+        except Exception:  # noqa: BLE001 - 接続できない台は候補から外すだけ
+            return None
+
+    def _measure(self) -> list[tuple[MachineState, GpuUsage | None]]:
+        names = self._registry.names
+        with ThreadPoolExecutor(max_workers=len(names)) as pool:
+            usages = list(pool.map(self._probe, names))
+        own = self._own_jobs()
+        now = self._clock()
+        grace = self._settings.scheduler.other_grace_sec
+        out = []
+        for name, usage in zip(names, usages):
+            current = usage is not None and usage.other_mib > self._settings.gpu_busy_threshold_mib
+            if current:
+                self._last_other_at[name] = now
+            seen = self._last_other_at.get(name)
+            recent = current or (seen is not None and now - seen < grace)
+            out.append((MachineState(
+                name=name, priority=self._settings.machines[name].priority, reachable=usage is not None,
+                own_jobs=own.get(name, 0), other_active=recent,
+                free_mib=(usage.free_mib if usage is not None and usage.total_mib else None),
+                other_mib=usage.other_mib if usage is not None else 0,
+            ), usage))
+        return out
+
+    def _states(self, fresh: bool) -> list[tuple[MachineState, GpuUsage | None]]:
+        with self._lock:
+            at = self._cache[0] if self._cache else None
+            if fresh or at is None or self._clock() - at >= self._settings.scheduler.probe_ttl_sec:
+                self._cache = (self._clock(), self._measure())
+            return self._cache[1]
+
+    def status(self, fresh: bool = False) -> dict:
+        """GET /api/machines 用。各台の使用状況・使えるか・使えない理由と、今選ばれる台。"""
+        pairs = self._states(fresh)
+        states = [s for s, _ in pairs]
+        reasons = evaluate(states, self.rule)
+        groups = self._settings.scheduler.reserve_groups
+        return {
+            "default": self._registry.default_name,
+            "selected": pick(states, reasons),
+            "machines": [{
+                "name": s.name, "priority": s.priority, "reachable": s.reachable, "own_jobs": s.own_jobs,
+                "other_mib": s.other_mib, "other_active": s.other_active,
+                "free_mib": s.free_mib, "total_mib": usage.total_mib if usage else None,
+                "available": reasons[s.name] is None, "reason": reasons[s.name],
+                "group": next((list(g) for g in groups if s.name in g), None),
+            } for s, usage in pairs],
+        }
+
+    def choose(self, requested: str | None = None) -> str:
+        """起動する台を決める。測り直してから判定する。requested があればその台が使えるかだけを見る。"""
+        pairs = self._states(fresh=True)
+        states = [s for s, _ in pairs]
+        reasons = evaluate(states, self.rule)
+        if requested is not None:
+            if requested not in reasons:
+                raise SelectionError(400, f"未登録のマシンです: {requested}（登録済み: {', '.join(reasons)}）")
+            reason = reasons[requested]
+            if reason is None:
+                return requested
+            code = 502 if not next(s for s in states if s.name == requested).reachable else 409
+            raise SelectionError(code, f"{requested} には起動できません: {reason}")
+        name = pick(states, reasons)
+        if name is not None:
+            return name
+        detail = " / ".join(f"{n}: {r}" for n, r in reasons.items())
+        code = 502 if not any(s.reachable for s in states) else 409
+        raise SelectionError(code, f"起動できる学習用PCがありません（{detail}）")

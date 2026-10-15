@@ -77,3 +77,19 @@ def test_set_add_creates_missing_key_only_with_flag(app_factory):
         ctl.cmd_set(api, argparse.Namespace(run_id=run_id, assignments=["wandb.newkey=1"]))
     ctl.cmd_set(api, argparse.Namespace(run_id=run_id, assignments=["wandb.newkey=1"], add=True))
     assert "newkey = 1" in api.call("GET", f"/api/runs/{run_id}")["config_toml"]
+
+
+def test_machines_and_start_with_machine(app_factory, capsys):
+    import argparse
+
+    app, settings, remote = app_factory()
+    write_project(settings.repo_root, "proj_a")
+    api = _FakeApi(TestClient(app))
+    ctl.cmd_machines(api, argparse.Namespace())
+    out = capsys.readouterr().out
+    assert "OK" in out and "default" in out and "自動選択される台: default" in out
+    run_id = api.call("POST", "/api/runs/draft", {"project": "proj_a", "group": "g1", "new_group": True})["run_id"]
+    with pytest.raises(ctl.CtlError, match="未登録のマシン"):
+        ctl.cmd_start(api, argparse.Namespace(run_id=run_id, machine="zzz"))
+    ctl.cmd_start(api, argparse.Namespace(run_id=run_id, machine="default"))
+    assert "@default" in capsys.readouterr().out

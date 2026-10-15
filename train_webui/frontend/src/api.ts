@@ -41,7 +41,28 @@ export interface Artifact {
   updated_at: string;
 }
 
+// 学習用PC（複数台）の状態（GET /api/machines）。available=false のとき reason に使えない理由が入る
+export interface MachineInfo {
+  name: string;
+  priority: number;
+  reachable: boolean;
+  own_jobs: number;
+  other_mib: number;
+  free_mib: number | null;
+  total_mib: number | null;
+  available: boolean;
+  reason: string | null;
+  group: string[] | null;
+}
+
+export interface MachinesResp {
+  default: string;
+  selected: string | null; // 自動選択でいま選ばれる台
+  machines: MachineInfo[];
+}
+
 export interface Run extends RunSummary {
+  machine?: string | null; // 学習を動かした台（古い run は無い = 既定の台）
   artifacts: Artifact[]; // 学習用PCに残った重みなど（本体はここに無く、場所だけ）
   // group（=モデル構成）の説明。Markdown。Claude がモデルの作りを知るための文書
   group_description: string;
@@ -233,7 +254,8 @@ export interface Api {
   updateGroupDescription(project: string, group: string, description: string): Promise<void>;
   getRun(runId: string): Promise<Run>;
   updateConfig(runId: string, configToml: string): Promise<Run>;
-  startRun(runId: string): Promise<Run>;
+  startRun(runId: string, machine?: string | null): Promise<Run>;
+  getMachines(): Promise<MachinesResp>;
   stopRun(runId: string): Promise<Run>;
   deleteRun(runId: string): Promise<void>;
   groupInfer(project: string, group: string): Promise<Job>;
@@ -246,7 +268,7 @@ export interface Api {
     opts?: { afterId?: number | null; maxPoints?: number },
   ): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
-  getMonitor(): Promise<MonitorResp>;
+  getMonitor(machine?: string | null): Promise<MonitorResp>;
   // omitStepLines: 横軸が step の line は点を返さない。label: そのグラフだけ取る
   getPlots(runId: string, afterId?: number | null, opts?: { omitStepLines?: boolean; label?: string }): Promise<Plot[]>;
   // line のグラフを x の幅ごとに平均して取る。bin は "epoch"（config の steps_per_epoch）か幅の数値
@@ -317,7 +339,11 @@ const realApi: Api = {
       method: 'PUT',
       body: JSON.stringify({ config_toml: configToml }),
     }),
-  startRun: (runId) => request<Run>(`/api/runs/${encodeURIComponent(runId)}/start`, { method: 'POST' }),
+  startRun: (runId, machine) =>
+    request<Run>(`/api/runs/${encodeURIComponent(runId)}/start${machine ? `?machine=${encodeURIComponent(machine)}` : ''}`, {
+      method: 'POST',
+    }),
+  getMachines: () => request<MachinesResp>('/api/machines'),
   stopRun: (runId) => request<Run>(`/api/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),
   deleteRun: (runId) => request<void>(`/api/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
   groupInfer: (project, group) =>
@@ -341,7 +367,7 @@ const realApi: Api = {
     const qs = params.toString();
     return request<Result[]>(`/api/runs/${encodeURIComponent(runId)}/results${qs ? `?${qs}` : ''}`);
   },
-  getMonitor: () => request<MonitorResp>('/api/monitor'),
+  getMonitor: (machine) => request<MonitorResp>(`/api/monitor${machine ? `?machine=${encodeURIComponent(machine)}` : ''}`),
   getLabels: (runIds) =>
     request<LabelInfo[]>(`/api/labels?run_ids=${encodeURIComponent(runIds.join(','))}`),
   getPlots: (runId, afterId, opts) => {

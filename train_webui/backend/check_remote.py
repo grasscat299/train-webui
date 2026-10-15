@@ -40,9 +40,12 @@ def _run(controller: RemoteController, remote_command: str, input: bytes | None 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", type=Path, default=DEFAULT_PATH)
+    p.add_argument("--machine", help="確認する台の名前（複数台のとき。省略時は既定の台）")
     args = p.parse_args()
 
     settings = load_settings(args.config)
+    if args.machine:
+        settings = settings.machine_settings(args.machine)  # 未登録の名前は KeyError で登録済みの一覧が出る
     r = settings.remote
     controller = RemoteController(settings)
     print(f"接続先: {r.user}@{r.host}:{r.port}（鍵: {r.key_path}）\n")

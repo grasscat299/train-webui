@@ -2,7 +2,7 @@ import { GroupDescription } from './GroupDescription';
 import { useEffect, useRef, useState } from 'react';
 import { RESULT_MAX_POINTS, api, lastResultId, mergeResults } from '../api';
 import { waitUntilVisible } from '../hooks/visibility';
-import type { ImageResult, MetricResult, Plot, Result, Run } from '../api';
+import type { ImageResult, MachinesResp, MetricResult, Plot, Result, Run } from '../api';
 import { LogView } from './LogView';
 import { MetricChart } from './MetricChart';
 import { ImageViewer } from './ImageViewer';
@@ -36,6 +36,21 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
   const [configError, setConfigError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [expandedInferJobs, setExpandedInferJobs] = useState<Record<string, boolean>>({});
+  // 学習を動かす台。'' = 自動（他の人が使っていない台・チームの枠を残すルール・優先度で server が選ぶ）
+  const [machine, setMachine] = useState('');
+  const [machines, setMachines] = useState<MachinesResp | null>(null);
+  const isDraft = run?.status === 'draft';
+  useEffect(() => {
+    if (!isDraft) return;
+    let cancelled = false;
+    const load = () => api.getMachines().then((m) => !cancelled && setMachines(m)).catch(() => {});
+    load();
+    const timer = window.setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isDraft]);
 
   useEffect(() => {
     plotsRef.current = undefined;
@@ -125,7 +140,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
     setConfigError(null);
     try {
       await api.updateConfig(run.run_id, configDraft);
-      const started = await api.startRun(run.run_id);
+      const started = await api.startRun(run.run_id, machine || null);
       setRun(started);
       onRunChanged();
       refresh();
@@ -206,6 +221,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
           </div>
           <div className="meta">
             {run.project} / <span title={`group_id: ${run.group}`}>{run.group_name}</span> ・ <span className="run-id">{run.run_id}</span>
+            {run.machine && <> ・ <span title="学習を動かした学習用PC">{run.machine}</span></>}
             {run.started_at && <> ・ 開始 {run.started_at}</>}
             {run.ended_at && <> ・ 終了 {run.ended_at}</>}
           </div>
@@ -213,6 +229,19 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
         <div className="actions">
           {run.status === 'draft' && (
             <>
+              {machines && machines.machines.length > 1 && (
+                <select value={machine} onChange={(e) => setMachine(e.target.value)} disabled={saving} title="学習を動かす台">
+                  <option value="">
+                    自動{machines.selected ? `（${machines.selected}）` : '（空き無し）'}
+                  </option>
+                  {machines.machines.map((m) => (
+                    <option key={m.name} value={m.name} disabled={!m.available} title={m.reason ?? undefined}>
+                      {m.name}
+                      {m.available ? '' : `（${m.reason ?? '使えません'}）`}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button onClick={handleSaveConfig} disabled={saving}>
                 保存
               </button>

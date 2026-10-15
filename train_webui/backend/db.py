@@ -182,6 +182,11 @@ class Database:
                 conn.execute("ALTER TABLE runs ADD COLUMN code_commit TEXT")
             if "parent_run_id" not in cols:  # 引き継ぎ学習の元になった run（config の init_from）。追加前のDBは NULL
                 conn.execute("ALTER TABLE runs ADD COLUMN parent_run_id TEXT")
+            if "machine" not in cols:  # 学習を動かした学習用PCの名前（server.toml の [remote.<名前>]）。追加前のDBは NULL = 既定のマシン
+                conn.execute("ALTER TABLE runs ADD COLUMN machine TEXT")
+            jcols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+            if "machine" not in jcols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN machine TEXT")
             rows = conn.execute(
                 "SELECT run_id, project, run_group FROM runs WHERE display_name IS NULL "
                 "ORDER BY created_at ASC, run_id ASC"

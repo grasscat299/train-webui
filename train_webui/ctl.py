@@ -7,7 +7,8 @@ server が起動している必要がある。リポジトリ直下から実行�
     venv/bin/python -m train_webui.ctl set <run_id> [--add] section.key=<TOMLリテラル> [...]
     venv/bin/python -m train_webui.ctl describe <project> <group> (--file パス | --text 文章 | 標準入力)
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
-    venv/bin/python -m train_webui.ctl start <run_id>
+    venv/bin/python -m train_webui.ctl machines
+    venv/bin/python -m train_webui.ctl start <run_id> [--machine NAME]
     venv/bin/python -m train_webui.ctl infer <project> [<group> | --run RUN_ID] [--set section.key=<TOMLリテラル> ...]
     venv/bin/python -m train_webui.ctl stop <run_id>
 
@@ -18,6 +19,9 @@ server が起動している必要がある。リポジトリ直下から実行�
   値は TOML のリテラルなので、文字列は引用符で囲む。
 - `infer --set` はその推論ジョブに渡す config だけを書き換える（run に保存された config は変えない）。
   無いキーは section の中に足す（例: `--set 'infer.mode="eval"' --set infer.eval_n=200`）。
+- `machines` は学習用PC（複数台）ごとの使用状況・今起動してよいか（だめな理由つき）・自動選択される台を出す。
+- `start` は台を自動で選ぶ（他の人が使っていない台・チームの枠を残すルール・5090 優先）。`--machine NAME` で指定もできるが、
+  ルールは同じく適用され、使えない台は断られる。引き継ぎ学習は元の run の台、`infer` は run を学習した台に固定される。
 - `start` / `infer` は GPU が使用中なら server が断る。
 """
 from __future__ import annotations
@@ -27,6 +31,7 @@ import difflib
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from .backend.settings import DEFAULT_PATH, load_settings
@@ -62,7 +67,8 @@ class Api:
 
 
 def _show_run(run: dict) -> None:
-    print(f"run_id: {run['run_id']}  {run['project']} / {run['group']} / {run['display_name']}  [{run['status']}]")
+    machine = f"  @{run['machine']}" if run.get("machine") else ""
+    print(f"run_id: {run['run_id']}  {run['project']} / {run['group']} / {run['display_name']}  [{run['status']}]{machine}")
 
 
 def cmd_draft(api: Api, args: argparse.Namespace) -> None:
@@ -117,7 +123,17 @@ def cmd_comment(api: Api, args: argparse.Namespace) -> None:
 
 
 def cmd_start(api: Api, args: argparse.Namespace) -> None:
-    _show_run(api.call("POST", f"/api/runs/{args.run_id}/start"))
+    query = f"?machine={urllib.parse.quote(args.machine)}" if args.machine else ""
+    _show_run(api.call("POST", f"/api/runs/{args.run_id}/start{query}"))
+
+
+def cmd_machines(api: Api, args: argparse.Namespace) -> None:
+    data = api.call("GET", "/api/machines?fresh=true")
+    for m in data["machines"]:
+        state = "OK  " if m["available"] else "不可"
+        use = "接続不可" if not m["reachable"] else f"他の人 {m['other_mib']} MiB / 自分のジョブ {m['own_jobs']}"
+        print(f"{state} {m['name']:<8} priority={m['priority']:<4} {use}" + (f"  … {m['reason']}" if m["reason"] else ""))
+    print(f"自動選択される台: {data['selected'] or 'なし（今は起動できません）'}")
 
 
 def cmd_stop(api: Api, args: argparse.Namespace) -> None:
@@ -164,8 +180,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("text")
     s.set_defaults(func=cmd_comment)
 
+    s = sub.add_parser("machines", help="学習用PCごとの使用状況と、今起動できるかを表示する")
+    s.set_defaults(func=cmd_machines)
+
     s = sub.add_parser("start", help="draft の学習を開始する")
     s.add_argument("run_id")
+    s.add_argument("--machine", help="動かす台の名前（省略時は自動選択。`machines` で確認）")
     s.set_defaults(func=cmd_start)
 
     s = sub.add_parser("stop", help="実行中の run を止める")

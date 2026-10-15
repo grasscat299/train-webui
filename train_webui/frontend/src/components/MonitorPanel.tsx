@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { api } from '../api';
 import type { MonitorResp } from '../api';
 import { usePolling } from '../hooks/usePolling';
@@ -48,10 +49,24 @@ function Gpus({ data }: { data: MonitorResp }) {
 // 学習用PCの GPU・CPU（コアごと）の使用率。このパネルを開いている間だけ（表示している間だけ）2秒ごとに取りに行く
 // （マウントされている間のポーリングなので、別のタブに切り替えれば止まる。タブが裏にある間も止まる）
 export function MonitorPanel() {
-  const { data, error } = usePolling(() => api.getMonitor(), INTERVAL_MS, []);
+  const [machine, setMachine] = useState('');  // '' = 既定の台
+  const { data: machines } = usePolling(() => api.getMachines(), 10000, []);
+  const { data, error } = usePolling(() => api.getMonitor(machine || null), INTERVAL_MS, [machine]);
   return (
     <div className="mon-panel">
-      <h2>学習用PCの使用状況</h2>
+      <h2>
+        学習用PCの使用状況
+        {machines && machines.machines.length > 1 && (
+          <select value={machine || machines.default} onChange={(e) => setMachine(e.target.value)} style={{ marginLeft: 12 }}>
+            {machines.machines.map((m) => (
+              <option key={m.name} value={m.name}>
+                {m.name}
+                {m.other_mib > 0 ? `（他の人 ${m.other_mib} MiB）` : ''}
+              </option>
+            ))}
+          </select>
+        )}
+      </h2>
       {error && <div className="error-banner">{error}</div>}
       {!data && !error && <p className="mon-note">取得中…</p>}
       {data && (
