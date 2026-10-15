@@ -75,9 +75,12 @@ export function PlotChart({ entries, ancestors }: { entries: PlotEntry[]; ancest
   // 平均表示（line だけ）。none=そのまま / epoch=config の steps_per_epoch ごと / width=x の幅ごと
   // 横軸が step の line（train/loss など）は、最初から epoch ごとの平均にする。epoch/loss や推論時の曲線など、
   // 横軸が step でないものは平均しない（意味が変わるため）。config に steps_per_epoch が無ければ、そのまま表示して理由を出す
-  const [avgMode, setAvgMode] = useState<'none' | 'epoch' | 'width'>(() =>
-    entries[0]?.plot.kind === 'line' && /^step/i.test(entries[0].plot.xlabel.trim()) ? 'epoch' : 'none',
-  );
+  // 利用者が選ぶまでは（avgChoice が null の間）、今の entries から決める。表示した最初の1回だけで決めると、
+  // 先頭の run の軸定義がまだ届いていない時に「なし」で固定されてしまうため、毎回見直す
+  const [avgChoice, setAvgChoice] = useState<'none' | 'epoch' | 'width' | null>(null);
+  const defaultAvg = entries.some((e) => e.plot.kind === 'line' && /^step/i.test(e.plot.xlabel.trim())) ? 'epoch' : 'none';
+  const avgMode = avgChoice ?? defaultAvg;
+  const setAvgMode = setAvgChoice;
   const [avgWidth, setAvgWidth] = useState('100');
   const label = entries[0]?.plot.label ?? '';
   const bin = avgMode === 'epoch' ? 'epoch' : avgWidth;
