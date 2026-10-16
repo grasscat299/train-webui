@@ -1,6 +1,7 @@
 import { usePersistentState } from '../hooks/usePersistentState';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { useView } from '../viewSettings';
+import { tipProps } from '../hoverTip';
 
 export interface PanelItem {
   label: string;
@@ -90,7 +91,7 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
                   <div
                     key={item.label}
                     className={`panel${item.wide ? ' panel-wide' : ''}${item.resize === 'image' ? ' panel-image' : ''}`}
-                    title={item.tip}
+                    {...tipProps(item.tip)}
                   >
                     <div className="panel-title">
                       <span>{item.label}</span>
