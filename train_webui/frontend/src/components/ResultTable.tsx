@@ -31,7 +31,7 @@ export function ResultTable({ label, columns }: {
             <th>{name}</th>
             {latest.map((m, i) => {
               const r = m.get(name);
-              return <td key={columns[i].runId}>{r ? Number(r.value.toPrecision(6)) : '-'}</td>;
+              return <td key={columns[i].runId}>{r ? (r.value == null ? 'NaN' : Number(r.value.toPrecision(6))) : '-'}</td>;
             })}
           </tr>
         ))}
