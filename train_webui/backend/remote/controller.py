@@ -64,6 +64,23 @@ class RemoteController:
                              timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "runのファイルの削除")
 
+    @property
+    def run_root(self) -> str:
+        return self._settings.remote.run_root
+
+    def push_checkpoint(self, run_id: str, dst_alias: str, dst_run_root: str) -> None:
+        """この台から別の台（~/.ssh/config の Host 名 dst_alias。ubun 間の直接接続）へ、重み（artifacts/*.pt）を rsync で送る。
+        直接つながらなければ RemoteError（呼び出し側は read_checkpoint / write_checkpoint の中継に切り替える）。"""
+        if not _SAFE_ID.fullmatch(run_id) or not re.fullmatch(r"[A-Za-z0-9_.-]+", dst_alias):
+            raise RemoteError(f"run_id か送り先の名前が不正です: {run_id!r} {dst_alias!r}")
+        src = shlex.quote(f"{self._settings.remote.run_root}/{run_id}/artifacts/")
+        dst = f"{dst_run_root}/{run_id}/artifacts/"
+        cmd = (f"ssh -o BatchMode=yes -o ConnectTimeout=10 {dst_alias} {shlex.quote('mkdir -p ' + shlex.quote(dst))} && "
+               f"rsync -a --include='*.pt' --exclude='*' -e 'ssh -o BatchMode=yes -o ConnectTimeout=10' "
+               f"{src} {dst_alias}:{shlex.quote(dst)}")
+        proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC * 10)
+        self._check(proc, f"重みの直接送信（{dst_alias}）")
+
     def read_checkpoint(self, run_id: str) -> bytes:
         """run の重み（artifacts/*.pt）を tar で読み出す。別の台へ送る（write_checkpoint）ために使う。"""
         if not _SAFE_ID.fullmatch(run_id):

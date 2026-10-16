@@ -28,10 +28,18 @@ class FakeRemote:
         self.fail_gpu = False
         self.checkpoints: dict[str, bytes] = {}   # run_id -> 重みの tar（read/write_checkpoint 用）
         self.fail_checkpoint = False
+        self.fail_direct = False                   # push_checkpoint（直接送信）を失敗させる
+        self.direct_pushes: list[tuple[str, str, str]] = []
+        self.run_root = "/remote/run_root"
         self._next_pid = 1000
 
     def remove_run_files(self, run_id: str) -> None:
         self.removed_runs.append(run_id)
+
+    def push_checkpoint(self, run_id: str, dst_alias: str, dst_run_root: str) -> None:
+        if self.fail_direct:
+            raise RuntimeError("直接送信に失敗しました（fake）")
+        self.direct_pushes.append((run_id, dst_alias, dst_run_root))
 
     def read_checkpoint(self, run_id: str) -> bytes:
         if self.fail_checkpoint:

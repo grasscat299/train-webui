@@ -405,8 +405,11 @@ def create_app(
         if requested is not None and requested != parent_machine:
             # 台を指定されたら、元の run の重みをその台に送る（ubun 間は直接つながらないので、このサーバーを中継する）
             try:
-                data = registry.get(parent_machine).read_checkpoint(parent_id)
-                registry.get(requested).write_checkpoint(parent_id, data)
+                src, dst = registry.get(parent_machine), registry.get(requested)
+                try:   # ubun 間の直接の rsync（~/.ssh/config の mesh-<台名>）。つながらなければ、このサーバーを経由する
+                    src.push_checkpoint(parent_id, f"mesh-{requested}", dst.run_root)
+                except Exception:  # noqa: BLE001
+                    dst.write_checkpoint(parent_id, src.read_checkpoint(parent_id))
             except Exception as e:  # noqa: BLE001 - 中継の失敗は 400 で理由を返す（run は起動しない）
                 raise HTTPException(
                     400, f"引き継ぎ元の run の重みを {parent_machine} から {requested} に送れませんでした: {e}") from e
