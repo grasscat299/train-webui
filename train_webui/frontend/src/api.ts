@@ -256,7 +256,7 @@ export interface Api {
   updateConfig(runId: string, configToml: string): Promise<Run>;
   startRun(runId: string, machine?: string | null): Promise<Run>;
   getMachines(): Promise<MachinesResp>;
-  stopRun(runId: string): Promise<Run>;
+  stopRun(runId: string, graceful?: boolean): Promise<Run>;
   deleteRun(runId: string): Promise<void>;
   groupInfer(project: string, group: string): Promise<Job>;
   // その run の重みで推論する（重みが登録された、学習の終わった run だけ）
@@ -344,7 +344,8 @@ const realApi: Api = {
       method: 'POST',
     }),
   getMachines: () => request<MachinesResp>('/api/machines'),
-  stopRun: (runId) => request<Run>(`/api/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),
+  stopRun: (runId, graceful = false) =>
+    request<Run>(`/api/runs/${encodeURIComponent(runId)}/stop${graceful ? '?graceful=true' : ''}`, { method: 'POST' }),
   deleteRun: (runId) => request<void>(`/api/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
   groupInfer: (project, group) =>
     request<Job>('/api/groups/infer', {

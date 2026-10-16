@@ -10,7 +10,7 @@ server が起動している必要がある。リポジトリ直下から実行�
     venv/bin/python -m train_webui.ctl machines
     venv/bin/python -m train_webui.ctl start <run_id> [--machine NAME]
     venv/bin/python -m train_webui.ctl infer <project> [<group> | --run RUN_ID] [--set section.key=<TOMLリテラル> ...]
-    venv/bin/python -m train_webui.ctl stop <run_id>
+    venv/bin/python -m train_webui.ctl stop <run_id> [--graceful]
 
 - `describe` は group（=モデル構成）の説明（Markdown）を上書きする。group は group_id でも表示名でもよい。
   モデルの作りを Claude が後から読めるようにするためのもの。新しいモデルを作ったら書く。
@@ -137,7 +137,8 @@ def cmd_machines(api: Api, args: argparse.Namespace) -> None:
 
 
 def cmd_stop(api: Api, args: argparse.Namespace) -> None:
-    _show_run(api.call("POST", f"/api/runs/{args.run_id}/stop"))
+    suffix = "?graceful=true" if args.graceful else ""
+    _show_run(api.call("POST", f"/api/runs/{args.run_id}/stop{suffix}"))
 
 
 def cmd_infer(api: Api, args: argparse.Namespace) -> None:
@@ -190,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("stop", help="実行中の run を止める")
     s.add_argument("run_id")
+    s.add_argument("--graceful", action="store_true",
+                   help="重みを保存してから止める（学習が次の区切りで保存して終了する。すぐには止まらない）")
     s.set_defaults(func=cmd_stop)
 
     s = sub.add_parser("infer", help="group の最新の学習済み run、または --run で指定した run の重みで推論する")

@@ -6,7 +6,7 @@ import inspect
 from . import _core
 
 __all__ = ["init", "log", "log_image", "log_table", "define_plot", "log_xy", "Plot", "finish",
-           "artifact_dir", "checkpoint_path", "init_checkpoint", "start_checkpoint", "log_artifact"]
+           "artifact_dir", "checkpoint_path", "init_checkpoint", "start_checkpoint", "log_artifact", "stop_requested"]
 
 
 def init(new_run: bool = False, run_id: str | None = None, source: str | None = None) -> None:
@@ -82,3 +82,8 @@ def log_artifact(path, kind: str = "checkpoint", name: str | None = None) -> Non
 def finish() -> None:
     """送信キューを吐き出してrunを終了する。"""
     _core.finish()
+
+
+def stop_requested() -> bool:
+    """「重みを保存して止めて」と頼まれたか。学習ループの区切りで確認し、True なら保存してループを抜ける。"""
+    return _core.stop_requested()

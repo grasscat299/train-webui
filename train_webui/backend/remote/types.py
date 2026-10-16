@@ -77,6 +77,9 @@ class RemoteControllerProtocol(Protocol):
     def stop(self, pid: int) -> None:
         """プロセスグループへ SIGTERM、stop_timeout_sec 後も生きていれば SIGKILL。"""
 
+    def request_stop(self, job_dir: str) -> None:
+        """<job_dir>/stop.request を作る。学習側（client.stop_requested）が見て、重みを保存して正常終了する。"""
+
     def poll(self, pid: int, job_dir: str) -> JobState:
         """kill -0 と run.exit でジョブの生存・終了コードを返す。"""
 

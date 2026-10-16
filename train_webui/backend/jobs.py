@@ -45,6 +45,7 @@ class JobManager:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._stopping: set[str] = set()
+        self._stop_requested: set[str] = set()  # 穏やかな停止を頼んだ job。正常終了したら finished でなく stopped にする
         self._stopping_lock = threading.Lock()
 
     # ---- バックグラウンドループ ------------------------------------
@@ -243,6 +244,7 @@ class JobManager:
             raise ValueError("起動処理中のため停止できません。数秒後にもう一度試してください")
         with self._stopping_lock:
             self._stopping.add(job["job_id"])
+        self._stop_requested.discard(job["job_id"])
         try:
             error = None
             try:
@@ -257,6 +259,19 @@ class JobManager:
         finally:
             with self._stopping_lock:
                 self._stopping.discard(job["job_id"])
+
+    def request_graceful_stop(self, run_id: str) -> None:
+        """学習に「重みを保存して終わって」と頼む。すぐ戻る。終了は次のポーリングで検知して stopped にする。"""
+        job = self._db.get_running_job_for_run(run_id)
+        if job is None:
+            raise ValueError("停止対象のジョブがありません")
+        if job["pid"] is None or job["job_dir"] is None:
+            raise ValueError("起動処理中のため停止できません。数秒後にもう一度試してください")
+        try:
+            self._remote_for(job).request_stop(job["job_dir"])
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"停止要求を送れませんでした: {e}") from e
+        self._stop_requested.add(job["job_id"])
 
     # ---- ポーリング ----------------------------------------------------
 
@@ -275,6 +290,10 @@ class JobManager:
             return
         self._pull_log(job)  # 終了直前の差分を取りこぼさないよう最後にもう一度
         status = "finished" if state.exit_code == 0 else "failed"
+        if job["job_id"] in self._stop_requested:
+            self._stop_requested.discard(job["job_id"])
+            if state.exit_code == 0:
+                status = "stopped"  # 穏やかな停止で、重みを保存して終わった
         now = now_iso()
         self._db.update_job(job["job_id"], status=status, ended_at=now, exit_code=state.exit_code)
         if job["kind"] == "train":

@@ -530,6 +530,13 @@ def start_checkpoint(save_path) -> str | None:
     return str(save_path) if Path(save_path).exists() else None
 
 
+def stop_requested() -> bool:
+    """「重みを保存して止めて」と頼まれたか。学習ループの区切りで呼び、True なら保存して抜ける。
+    WebUIから起動されていなければ常に False。"""
+    path = os.environ.get("TRAIN_WEBUI_STOP_FILE")
+    return bool(path) and os.path.exists(path)
+
+
 def log_artifact(path, kind: str, name: str | None) -> None:
     """保存した成果物（重みなど）の場所をserverに登録する。ファイル本体は送らない。同じ名前は上書き。"""
     if _client is None or not _client.can_send:
