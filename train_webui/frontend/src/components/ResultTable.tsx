@@ -29,8 +29,8 @@ export function ResultTable({ label, columns, docs }: {
       </thead>
       <tbody>
         {names.map((name) => (
-          <tr key={name}>
-            <th title={docs ? describeMetric(docs, name) : undefined}>{name}</th>
+          <tr key={name} title={docs ? describeMetric(docs, name) : undefined}>
+            <th>{name}</th>
             {latest.map((m, i) => {
               const r = m.get(name);
               return <td key={columns[i].runId}>{r ? (r.value == null ? 'NaN' : Number(r.value.toPrecision(6))) : '-'}</td>;

@@ -90,8 +90,9 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
                   <div
                     key={item.label}
                     className={`panel${item.wide ? ' panel-wide' : ''}${item.resize === 'image' ? ' panel-image' : ''}`}
+                    title={item.tip}
                   >
-                    <div className="panel-title" title={item.tip}>
+                    <div className="panel-title">
                       <span>{item.label}</span>
                       {item.subtitle && <span className="panel-subtitle">{item.subtitle}</span>}
                     </div>
