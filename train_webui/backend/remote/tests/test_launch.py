@@ -160,3 +160,23 @@ def test_checkpoint_relay_commands_and_safe_ids():
             rc.read_checkpoint(bad)
         with pytest.raises(RemoteError):
             rc.write_checkpoint(bad, b"")
+
+
+def test_push_checkpoint_command_and_validation():
+    import pytest
+    from pathlib import Path
+    from ..controller import RemoteController
+    from ..errors import RemoteError
+    from .conftest import FakeRunner, fail, make_settings, ok
+
+    rc = RemoteController(make_settings(Path("/tmp/repo")), runner=FakeRunner([ok(), fail(255, b"Permission denied")]))
+    rc.push_checkpoint("20261016_190753", "mesh-gpu2", "/home/user/train_webui/td_plan/runs")
+    cmd = rc._runner.calls[0]["args"][-1]
+    assert "rsync -a --include='*.pt' --exclude='*'" in cmd and "mesh-gpu2:" in cmd
+    assert "/home/user/train_webui_runs/20261016_190753/artifacts/" in cmd
+    with pytest.raises(RemoteError):
+        rc.push_checkpoint("20261016_190753", "mesh-gpu2", "/x")      # 直接つながらない → 例外（呼び出し側が中継に切り替える）
+    with pytest.raises(RemoteError):
+        rc.push_checkpoint("../x", "mesh-gpu2", "/x")
+    with pytest.raises(RemoteError):
+        rc.push_checkpoint("20261016_190753", "bad host;rm", "/x")

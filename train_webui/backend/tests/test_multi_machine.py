@@ -94,6 +94,7 @@ def test_infer_and_continue_stay_on_the_machine_with_the_weights(tmp_path):
     fakes["b1"].checkpoints[run["run_id"]] = b"TAR-BYTES"
     child = _draft(client)
     app.state.db.update_run(child["run_id"], parent_run_id=run["run_id"])
+    fakes["b1"].fail_direct = True              # 直接送信が失敗したら、サーバー経由の中継に切り替える
     fakes["b1"].fail_checkpoint = True          # 重みを送れなければ、理由を返して起動しない
     bad = client.post(f"/api/runs/{child['run_id']}/start", params={"machine": "a1"})
     assert bad.status_code == 400 and "b1" in bad.json()["detail"] and "a1" in bad.json()["detail"]
@@ -150,3 +151,15 @@ def test_unreachable_machine_is_not_reprobed_by_display_but_is_by_start(tmp_path
     now[0] = 6.0
     assert mm.choose() == "a1"           # 起動の判定は測り直すので、復旧をすぐ拾う
     assert len(calls) == 2
+
+
+def test_continue_on_other_machine_prefers_direct_push(tmp_path):
+    app, client, fakes = _setup(tmp_path)
+    run = _draft(client)
+    app.state.db.update_run(run["run_id"], machine="b1")
+    child = _draft(client)
+    app.state.db.update_run(child["run_id"], parent_run_id=run["run_id"])
+    resp = client.post(f"/api/runs/{child['run_id']}/start", params={"machine": "a1"})
+    assert resp.status_code == 200 and resp.json()["machine"] == "a1"
+    assert fakes["b1"].direct_pushes == [(run["run_id"], "mesh-a1", "/remote/run_root")]
+    assert not fakes["a1"].checkpoints           # 中継は使っていない

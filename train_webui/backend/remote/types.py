@@ -71,6 +71,13 @@ class RemoteControllerProtocol(Protocol):
     def remove_run_files(self, run_id: str) -> None:
         """学習用PCの <run_root>/<run_id>/（重み・ログなど）を消す。無ければ何もしない。"""
 
+    @property
+    def run_root(self) -> str:
+        """学習用PCの run_root。"""
+
+    def push_checkpoint(self, run_id: str, dst_alias: str, dst_run_root: str) -> None:
+        """この台から別の台（ssh config の Host 名）へ、重みを rsync で直接送る。つながらなければ例外。"""
+
     def read_checkpoint(self, run_id: str) -> bytes:
         """学習用PCの <run_root>/<run_id>/artifacts/*.pt を tar で読み出す（別の台へ送る用）。"""
 
