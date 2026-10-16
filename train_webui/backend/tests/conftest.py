@@ -26,10 +26,22 @@ class FakeRemote:
         self.fail_launch = False
         self.gpu = GpuUsage(total_used_mib=0, own_mib=0)
         self.fail_gpu = False
+        self.checkpoints: dict[str, bytes] = {}   # run_id -> 重みの tar（read/write_checkpoint 用）
+        self.fail_checkpoint = False
         self._next_pid = 1000
 
     def remove_run_files(self, run_id: str) -> None:
         self.removed_runs.append(run_id)
+
+    def read_checkpoint(self, run_id: str) -> bytes:
+        if self.fail_checkpoint:
+            raise RuntimeError("重みの読み出しに失敗しました（fake）")
+        return self.checkpoints[run_id]
+
+    def write_checkpoint(self, run_id: str, data: bytes) -> None:
+        if self.fail_checkpoint:
+            raise RuntimeError("重みの書き込みに失敗しました（fake）")
+        self.checkpoints[run_id] = data
 
     def sync_code(self, source_dir=None) -> SyncInfo:
         self.sync_calls += 1
