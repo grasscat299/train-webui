@@ -1,5 +1,6 @@
 import type { Result, TableResult } from '../api';
 import { describeMetric } from '../metricDocs';
+import { tipProps } from '../hoverTip';
 
 // 表: 行 = 指標名、列 = run。同じ指標が複数回送られていたら最新の値を出す。
 export function ResultTable({ label, columns, docs }: {
@@ -29,7 +30,7 @@ export function ResultTable({ label, columns, docs }: {
       </thead>
       <tbody>
         {names.map((name) => (
-          <tr key={name} title={docs ? describeMetric(docs, name) : undefined}>
+          <tr key={name} {...tipProps(docs ? describeMetric(docs, name) : undefined)}>
             <th>{name}</th>
             {latest.map((m, i) => {
               const r = m.get(name);

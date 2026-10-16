@@ -807,3 +807,19 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
     border-radius: 50%;
   }
 }
+
+/* 指標・グラフの説明のツールチップ（hoverTip.tsx）。マウスの操作を邪魔しないよう pointer-events: none */
+.hover-tip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  background: #22262e;
+  color: #e6e8ec;
+  border: 1px solid #3a404c;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}

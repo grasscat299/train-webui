@@ -15,6 +15,7 @@ import type { SidebarRun } from './components/CommentSidebar';
 import { ViewSettingsMenu } from './components/ViewSettingsMenu';
 import type { Theme } from './components/ViewSettingsMenu';
 import { DEFAULT_VIEW, ViewContext, useViewSettings, viewStyle } from './viewSettings';
+import { HoverTipLayer } from './hoverTip';
 
 type Tab = 'train' | 'result' | 'monitor';
 
@@ -267,6 +268,7 @@ export default function App() {
   return (
     <ViewContext.Provider value={{ view, update: updateView }}>
       <div className="app" style={viewStyle(view)}>
+        <HoverTipLayer />
         <header className="topbar">
           <button className="nav-toggle" onClick={() => setNavOpen(!navOpen)} aria-label="run一覧を開く／閉じる" aria-expanded={navOpen}>
             ☰
