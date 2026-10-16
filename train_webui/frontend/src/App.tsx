@@ -3,6 +3,7 @@ import { api } from './api';
 import type { Comparison, GroupNode, ProjectNode, RunSummary, StateResp } from './api';
 import { usePolling } from './hooks/usePolling';
 import { usePersistentState } from './hooks/usePersistentState';
+import { useIsMobile } from './hooks/useIsMobile';
 import { Tree } from './components/Tree';
 import { TrainPanel } from './components/TrainPanel';
 import { ResultPanel } from './components/ResultPanel';
@@ -184,7 +185,12 @@ export default function App() {
   }, [viewKey, tree === null]);
 
   // 右のコメント欄: Train タブでは選択中の run、Result タブでは比較中の run
-  const [commentsOpen, setCommentsOpen] = usePersistentState<boolean>('commentsOpen', true);
+  const [commentsOpenDesktop, setCommentsOpen] = usePersistentState<boolean>('commentsOpen', true);
+  // スマホでは左のツリー・右のコメント欄を、ボタンで開く引き出しにする（開始時は閉じておく）
+  const isMobile = useIsMobile();
+  const [navOpen, setNavOpen] = useState(false);
+  const [commentsOpenMobile, setCommentsOpenMobile] = useState(false);
+  const commentsOpen = isMobile ? commentsOpenMobile : commentsOpenDesktop;
   const sidebarRuns = useMemo<SidebarRun[]>(() => {
     const byId = new Map<string, SidebarRun>();
     treeData.forEach((p) => p.groups.forEach((g) => g.runs.forEach((r) => {
@@ -262,6 +268,9 @@ export default function App() {
     <ViewContext.Provider value={{ view, update: updateView }}>
       <div className="app" style={viewStyle(view)}>
         <header className="topbar">
+          <button className="nav-toggle" onClick={() => setNavOpen(!navOpen)} aria-label="run一覧を開く／閉じる" aria-expanded={navOpen}>
+            ☰
+          </button>
           <h1>学習管理WebUI</h1>
           <nav className="tabs">
             <button className={tab === 'train' ? 'active' : ''} onClick={() => setTab('train')}>
@@ -289,13 +298,17 @@ export default function App() {
             {actionError}（クリックで閉じる）
           </div>
         )}
-        <div className="layout">
+        <div className={`layout${navOpen ? ' nav-open' : ''}`}>
+          <div className="nav-backdrop" onClick={() => setNavOpen(false)} />
           <Tree
             tree={treeData}
             mode={dataTab}
             busy={busy}
             selectedRunId={selectedRunId}
-            onSelectRun={setSelectedRunId}
+            onSelectRun={(id) => {
+              setSelectedRunId(id);
+              setNavOpen(false);
+            }}
             onNewRunDraft={handleNewRunDraft}
             onContinueRun={(project, runId) => handleDraftFromRun(project, 'continue', runId)}
             onRerunRun={(project, runId) => handleDraftFromRun(project, 'rerun', runId)}
@@ -377,7 +390,7 @@ export default function App() {
           />
           <CommentSidebar
             open={commentsOpen}
-            onToggle={() => setCommentsOpen(!commentsOpen)}
+            onToggle={() => (isMobile ? setCommentsOpenMobile(!commentsOpenMobile) : setCommentsOpen(!commentsOpenDesktop))}
             runs={sidebarRuns}
             emptyText={dataTab === 'train' ? '左のツリーで run を選ぶと、その run のコメントを書けます。' : '比較する run を目のアイコンで選ぶと、ここに並びます。'}
             onSaved={rescan}
