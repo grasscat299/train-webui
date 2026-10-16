@@ -269,6 +269,8 @@ export interface Api {
     opts?: { afterId?: number | null; maxPoints?: number },
   ): Promise<Result[]>;
   getLabels(runIds: string[]): Promise<LabelInfo[]>;
+  // 指標・グラフの説明（名前 → 説明。project の metric_docs.toml）。マウスを乗せたときの表示用
+  getMetricDocs(project: string): Promise<Record<string, string>>;
   getMonitor(machine?: string | null): Promise<MonitorResp>;
   // omitStepLines: 横軸が step の line は点を返さない。label: そのグラフだけ取る
   getPlots(runId: string, afterId?: number | null, opts?: { omitStepLines?: boolean; label?: string }): Promise<Plot[]>;
@@ -370,6 +372,7 @@ const realApi: Api = {
     return request<Result[]>(`/api/runs/${encodeURIComponent(runId)}/results${qs ? `?${qs}` : ''}`);
   },
   getMonitor: (machine) => request<MonitorResp>(`/api/monitor${machine ? `?machine=${encodeURIComponent(machine)}` : ''}`),
+  getMetricDocs: (project) => request<Record<string, string>>(`/api/metric_docs?project=${encodeURIComponent(project)}`),
   getLabels: (runIds) =>
     request<LabelInfo[]>(`/api/labels?run_ids=${encodeURIComponent(runIds.join(','))}`),
   getPlots: (runId, afterId, opts) => {

@@ -5,6 +5,7 @@ import { useView } from '../viewSettings';
 export interface PanelItem {
   label: string;
   subtitle?: string | null; // 軸つきグラフの title など、ラベルと別に出したい見出し
+  tip?: string; // マウスを乗せたときに出す説明（指標の意味など）
   wide?: boolean; // グリッドの全幅を使う（複数runの画像を並べる時など）
   // 右下のつまみをドラッグした時に変える大きさ。chart: 全グラフの幅と高さ、image: 全画像の幅（比較しやすいよう一括で変える）
   resize?: 'chart' | 'image';
@@ -90,7 +91,7 @@ export function PanelSections({ items }: { items: PanelItem[] }) {
                     key={item.label}
                     className={`panel${item.wide ? ' panel-wide' : ''}${item.resize === 'image' ? ' panel-image' : ''}`}
                   >
-                    <div className="panel-title">
+                    <div className="panel-title" title={item.tip}>
                       <span>{item.label}</span>
                       {item.subtitle && <span className="panel-subtitle">{item.subtitle}</span>}
                     </div>
