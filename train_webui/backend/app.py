@@ -429,6 +429,18 @@ def create_app(
                 scan_cache["at"] = time.monotonic()
             return list(scan_cache["projects"])
 
+    @app.get("/api/metric_docs")
+    def get_metric_docs(project: str) -> dict[str, str]:
+        """指標・グラフの説明（マウスを乗せたときの表示用）。project の `metric_docs.toml` の [docs]（名前 → 説明）。無ければ空。"""
+        if project not in get_projects():
+            raise HTTPException(404, f"project が見つかりません: {project}")
+        path = settings.repo_root / project / "metric_docs.toml"
+        if not path.is_file():
+            return {}
+        import tomli
+        docs = tomli.loads(path.read_text(encoding="utf-8")).get("docs", {})
+        return {str(k): str(v) for k, v in docs.items()}
+
     @app.get("/api/tree")
     def get_tree() -> list[dict]:
         return _build_tree(db, get_projects())

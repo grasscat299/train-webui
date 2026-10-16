@@ -163,3 +163,13 @@ def test_continue_on_other_machine_prefers_direct_push(tmp_path):
     assert resp.status_code == 200 and resp.json()["machine"] == "a1"
     assert fakes["b1"].direct_pushes == [(run["run_id"], "mesh-a1", "/remote/run_root")]
     assert not fakes["a1"].checkpoints           # 中継は使っていない
+
+
+def test_metric_docs_endpoint(tmp_path):
+    app, client, fakes = _setup(tmp_path)
+    root = app.state.settings.repo_root
+    (root / "proj_a" / "metric_docs.toml").write_text('[docs]\n"all_killed" = "全滅率"\n', encoding="utf-8")
+    assert client.get("/api/metric_docs", params={"project": "proj_a"}).json() == {"all_killed": "全滅率"}
+    assert client.get("/api/metric_docs", params={"project": "nope"}).status_code == 404
+    (root / "proj_a" / "metric_docs.toml").unlink()
+    assert client.get("/api/metric_docs", params={"project": "proj_a"}).json() == {}   # 無ければ空

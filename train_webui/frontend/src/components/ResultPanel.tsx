@@ -10,6 +10,8 @@ import { PanelSections } from './PanelSections';
 import type { PanelItem } from './PanelSections';
 import { copyText } from '../copyText';
 import { usePersistentState } from '../hooks/usePersistentState';
+import { useMetricDocs } from '../hooks/useMetricDocs';
+import { describeMetric } from '../metricDocs';
 
 interface RunMeta {
   project: string;
@@ -52,6 +54,7 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
   }, [tree]);
 
   const key = runIds.slice().sort().join(',');
+  const metricDocs = useMetricDocs(runMetaMap[runIds[0]]?.project);
 
   // 各 run が引き継いだ元の run（古い順）。ツリーに無い・輪になる場合はそこで止める
   const ancestorsOf = useMemo(() => {
@@ -187,14 +190,16 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
         });
         // 見出しの title は PlotChart と同じく updated_at が最新の定義のもの
         const latest = entries.map((e) => e.plot).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
-        return { label: l.label, subtitle: latest?.title, content: <PlotChart entries={entries} ancestors={connectContinued ? ancestorsOf : undefined} /> };
+        return { label: l.label, subtitle: latest?.title, tip: describeMetric(metricDocs, l.label), content: <PlotChart entries={entries} ancestors={connectContinued ? ancestorsOf : undefined} /> };
       }
       if (l.kind === 'table') {
         return {
           label: l.label,
+          tip: describeMetric(metricDocs, l.label),
           content: (
             <ResultTable
               label={l.label}
+              docs={metricDocs}
               columns={runIds.map((id) => ({ runId: id, runLabel: runLabel(id), results: resultsByRun[id] ?? [] }))}
             />
           ),
@@ -203,6 +208,7 @@ export function ResultPanel({ runIds, tree, activeRunId, selectedLabels, setSele
       if (l.kind === 'metric') {
         return {
           label: l.label,
+          tip: describeMetric(metricDocs, l.label),
           content: (
             <MetricChart
               series={runIds.map((id) => ({

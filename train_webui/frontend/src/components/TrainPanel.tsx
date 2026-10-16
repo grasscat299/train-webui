@@ -9,6 +9,8 @@ import { ImageViewer } from './ImageViewer';
 import { ResultTable } from './ResultTable';
 import { PlotChart, mergePlots } from './PlotChart';
 import { PanelSections } from './PanelSections';
+import { useMetricDocs } from '../hooks/useMetricDocs';
+import { describeMetric } from '../metricDocs';
 import type { PanelItem } from './PanelSections';
 
 interface Props {
@@ -25,6 +27,7 @@ function uniqueLabels(results: Result[]): string[] {
 // Train タブ: 選択中runの状態(draft/running/finished/...)に応じた表示を切り替える（design.md §8）。
 export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
   const [run, setRun] = useState<Run | null>(null);
+  const metricDocs = useMetricDocs(run?.project);
   const [results, setResults] = useState<Result[]>([]);
   const [plots, setPlots] = useState<Plot[]>([]);
   // 軸つきグラフの差分取得用（ポーリング中に最新を参照するため ref に持つ）
@@ -180,10 +183,12 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
     ...plots.map((p) => ({
       label: p.label,
       subtitle: p.title,
+      tip: describeMetric(metricDocs, p.label),
       content: <PlotChart entries={[{ runId: run.run_id, runLabel: run.display_name, plot: p }]} />,
     })),
     ...metricLabels.map((label) => ({
       label,
+      tip: describeMetric(metricDocs, label),
       content: (
         <MetricChart
           series={[{ runId: run.run_id, label: run.display_name, points: results.filter((r): r is MetricResult => r.kind === 'metric' && r.label === label) }]}
@@ -192,7 +197,8 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
     })),
     ...tableLabels.map((label) => ({
       label,
-      content: <ResultTable label={label} columns={[{ runId: run.run_id, runLabel: run.display_name, results }]} />,
+      tip: describeMetric(metricDocs, label),
+      content: <ResultTable label={label} docs={metricDocs} columns={[{ runId: run.run_id, runLabel: run.display_name, results }]} />,
     })),
     ...imageLabels.map((label) => ({
       label,

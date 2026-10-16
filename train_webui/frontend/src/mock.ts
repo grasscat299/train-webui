@@ -716,6 +716,10 @@ async function getResults(
     .sort((a, b) => a.sent_at.localeCompare(b.sent_at));
 }
 
+async function getMetricDocs(_project: string): Promise<Record<string, string>> {
+  return { all_killed_rate: '全シナリオのうち、全目標を達成した割合（モックの説明）' };
+}
+
 async function getLabels(runIds: string[]): Promise<LabelInfo[]> {
   const map = new Map<string, LabelInfo['kind']>();
   for (const id of runIds) {
@@ -835,6 +839,7 @@ export const mockApi: Api = {
   getJobLog,
   getResults,
   getLabels,
+  getMetricDocs,
   getMachines: async () => ({
     default: 'gpu1',
     selected: 'gpu1',

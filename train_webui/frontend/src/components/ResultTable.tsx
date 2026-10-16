@@ -1,8 +1,10 @@
 import type { Result, TableResult } from '../api';
+import { describeMetric } from '../metricDocs';
 
 // 表: 行 = 指標名、列 = run。同じ指標が複数回送られていたら最新の値を出す。
-export function ResultTable({ label, columns }: {
+export function ResultTable({ label, columns, docs }: {
   label: string;
+  docs?: Record<string, string>; // 指標の説明（行の名前にマウスを乗せると出す）
   columns: { runId: string; runLabel: string; results: Result[] }[];
 }) {
   const latest = columns.map((c) => {
@@ -28,7 +30,7 @@ export function ResultTable({ label, columns }: {
       <tbody>
         {names.map((name) => (
           <tr key={name}>
-            <th>{name}</th>
+            <th title={docs ? describeMetric(docs, name) : undefined}>{name}</th>
             {latest.map((m, i) => {
               const r = m.get(name);
               return <td key={columns[i].runId}>{r ? (r.value == null ? 'NaN' : Number(r.value.toPrecision(6))) : '-'}</td>;
