@@ -162,18 +162,11 @@ class RemoteController:
         cmd = (
             "cat /proc/stat; echo ---; sleep 0.5; cat /proc/stat; echo ---; "
             "nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw "
-            "--format=csv,noheader,nounits 2>/dev/null; true"
-        )
-        proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
-        self._check(proc, "CPU/GPU使用状況の確認")
-        return parse_monitor(proc.stdout.decode("utf-8", errors="replace"))
-
-    def monitor(self) -> dict:
-        # /proc/stat を 0.5 秒あけて2回読み、差分からコアごとの使用率を出す。GPU は nvidia-smi を1回
-        cmd = (
-            "cat /proc/stat; echo ---; sleep 0.5; cat /proc/stat; echo ---; "
-            "nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw "
-            "--format=csv,noheader,nounits 2>/dev/null; true"
+            "--format=csv,noheader,nounits 2>/dev/null; echo ---; "
+            # CPU 温度のセンサー（名前|ラベル|ミリ℃）。hwmon（coretemp・k10temp など）→ 無ければ thermal_zone
+            "for f in /sys/class/hwmon/hwmon*/temp*_input; do h=${f%/*}; "
+            'echo "$(cat $h/name 2>/dev/null)|$(cat ${f%_input}_label 2>/dev/null)|$(cat $f 2>/dev/null)"; done 2>/dev/null; '
+            'for z in /sys/class/thermal/thermal_zone*; do echo "$(cat $z/type 2>/dev/null)||$(cat $z/temp 2>/dev/null)"; done 2>/dev/null; true'
         )
         proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "CPU/GPU使用状況の確認")
@@ -319,9 +312,26 @@ def _cpu_times(text: str) -> dict[str, tuple[int, int]]:
     return out
 
 
+_CPU_SENSORS = ("coretemp", "k10temp", "zenpower", "cpu_thermal", "x86_pkg_temp")
+
+
+def _cpu_temp(text: str) -> float | None:
+    """センサー行（名前|ラベル|ミリ℃）から CPU 温度(℃)。パッケージ全体（Package id / Tctl / Tdie）を優先し、無ければ CPU のセンサーの最大値。"""
+    pkg: list[float] = []
+    other: list[float] = []
+    for line in text.splitlines():
+        c = line.strip().split("|")
+        if len(c) != 3 or not c[2].lstrip("-").isdigit() or c[0] not in _CPU_SENSORS:
+            continue
+        t = int(c[2]) / 1000
+        (pkg if c[1].startswith(("Package", "Tctl", "Tdie")) else other).append(t)
+    vals = pkg or other
+    return round(max(vals), 1) if vals else None
+
+
 def parse_monitor(output: str) -> dict:
     parts = output.split("---")
-    if len(parts) != 3:
+    if len(parts) not in (3, 4):
         raise RemoteError(f"モニタの出力を解釈できませんでした: {output[-500:]!r}")
     before, after = _cpu_times(parts[0]), _cpu_times(parts[1])
 
@@ -350,5 +360,6 @@ def parse_monitor(output: str) -> dict:
     return {
         "cpu_total": usage("cpu") if "cpu" in after and "cpu" in before else None,
         "cpu_cores": [usage(n) for n in names],
+        "cpu_temp_c": _cpu_temp(parts[3]) if len(parts) == 4 else None,
         "gpus": gpus,
     }

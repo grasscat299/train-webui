@@ -237,6 +237,7 @@ export interface MonitorGpu {
 // 学習用PCの使用状況（GET /api/monitor）。cpu_cores は論理コアごとの使用率(%)
 export interface MonitorResp {
   cpu_total: number | null;
+  cpu_temp_c: number | null; // ℃。センサーが読めない台は null
   cpu_cores: number[];
   gpus: MonitorGpu[];
 }
