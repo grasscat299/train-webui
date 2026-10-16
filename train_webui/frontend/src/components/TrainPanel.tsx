@@ -151,10 +151,10 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
     }
   };
 
-  const handleStop = async () => {
+  const handleStop = async (graceful = false) => {
     setSaving(true);
     try {
-      const updated = await api.stopRun(run.run_id);
+      const updated = await api.stopRun(run.run_id, graceful);
       setRun(updated);
       onRunChanged();
     } catch (e) {
@@ -251,9 +251,18 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
             </>
           )}
           {canStopTrain && (
-            <button onClick={handleStop} disabled={saving} className="danger">
-              中止
-            </button>
+            <>
+              <button
+                onClick={() => handleStop(true)}
+                disabled={saving}
+                title="学習が次の区切りで重みを保存してから終了します（すぐには止まりません）"
+              >
+                保存して停止
+              </button>
+              <button onClick={() => handleStop(false)} disabled={saving} className="danger">
+                中止
+              </button>
+            </>
           )}
           {canDelete && (
             <button onClick={handleDelete} disabled={saving} className="danger">
@@ -285,7 +294,7 @@ export function TrainPanel({ runId, busy, onRunChanged, onDeleted }: Props) {
       {activeInferJob && (
         <div className="infer-banner">
           <strong>infer実行中</strong>（job {activeInferJob.job_id}）
-          <button onClick={handleStop} disabled={saving}>
+          <button onClick={() => handleStop(false)} disabled={saving}>
             中止
           </button>
           <LogView key={activeInferJob.job_id} jobId={activeInferJob.job_id} />

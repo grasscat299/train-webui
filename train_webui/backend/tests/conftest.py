@@ -19,6 +19,7 @@ class FakeRemote:
         self.removed_runs: list[str] = []
         self.launches: list[LaunchSpec] = []
         self.stops: list[int] = []
+        self.stop_requests: list[str] = []
         self.poll_results: dict[int, JobState] = {}
         self.logs: dict[str, bytes] = {}
         self.fail_sync = False
@@ -51,6 +52,9 @@ class FakeRemote:
     def stop(self, pid: int) -> None:
         self.stops.append(pid)
         self.poll_results[pid] = JobState(alive=False, exit_code=None)
+
+    def request_stop(self, job_dir: str) -> None:
+        self.stop_requests.append(job_dir)
 
     def poll(self, pid: int, job_dir: str) -> JobState:
         return self.poll_results.get(pid, JobState(alive=False, exit_code=1))

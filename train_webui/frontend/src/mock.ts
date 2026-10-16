@@ -647,7 +647,7 @@ async function startRun(runId: string): Promise<Run> {
   return cloneRun(run);
 }
 
-async function stopRun(runId: string): Promise<Run> {
+async function stopRun(runId: string, _graceful = false): Promise<Run> {
   const run = getOrThrow(runId);
   const runningJob = (jobsByRun.get(runId) ?? []).find((j) => j.status === 'running');
   if (!runningJob) {

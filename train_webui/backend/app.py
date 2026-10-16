@@ -615,12 +615,15 @@ def create_app(
         return _run_detail(db, db.get_run(run_id))
 
     @app.post("/api/runs/{run_id}/stop")
-    async def stop_run(run_id: str) -> dict:
+    async def stop_run(run_id: str, graceful: bool = False) -> dict:
         run = db.get_run(run_id)
         if run is None:
             raise HTTPException(404, "run が見つかりません")
         try:
-            await run_in_threadpool(job_manager.stop_job, run_id)
+            if graceful:
+                await run_in_threadpool(job_manager.request_graceful_stop, run_id)
+            else:
+                await run_in_threadpool(job_manager.stop_job, run_id)
         except ValueError as e:
             raise HTTPException(409, str(e)) from e
         return _run_detail(db, db.get_run(run_id))

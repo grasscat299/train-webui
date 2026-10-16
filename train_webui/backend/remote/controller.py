@@ -18,6 +18,7 @@ from .types import CommandRunner, GpuUsage, JobState, LaunchResult, LaunchSpec, 
 
 _SAFE_ID = re.compile(r"[A-Za-z0-9_.-]+")
 _SSH_TIMEOUT_SEC = 30.0
+STOP_REQUEST_FILE = "stop.request"
 _RSYNC_TIMEOUT_SEC = 300.0
 _GIT_TIMEOUT_SEC = 15.0
 _MAX_UNTRACKED_BYTES = 1024 * 1024
@@ -100,6 +101,10 @@ class RemoteController:
             self._sleep(poll_interval)
         if self._is_alive(pid):
             self._kill(pid, "KILL")
+
+    def request_stop(self, job_dir: str) -> None:
+        proc = self._ssh_run(f"touch {shlex.quote(job_dir + '/' + STOP_REQUEST_FILE)}", timeout=_SSH_TIMEOUT_SEC)
+        self._check(proc, "停止要求の書き込み")
 
     def poll(self, pid: int, job_dir: str) -> JobState:
         quoted_job_dir = shlex.quote(job_dir)
@@ -208,6 +213,8 @@ class RemoteController:
             # 重みなどの保存先（run ごと）と、引き継ぎ元の run の重みを探すための起点（design.md §3.5）
             f"TRAIN_WEBUI_ARTIFACT_DIR={shlex.quote(f'{r.run_root}/{spec.run_id}/artifacts')}",
             f"TRAIN_WEBUI_RUN_ROOT={shlex.quote(r.run_root)}",
+            # このファイルができたら、学習が区切りのよいところで重みを保存して正常終了する（穏やかな停止）
+            f"TRAIN_WEBUI_STOP_FILE={shlex.quote(job_dir + '/' + STOP_REQUEST_FILE)}",
         ]
         if spec.parent_run_id:
             env_parts.append(f"TRAIN_WEBUI_INIT_FROM={shlex.quote(spec.parent_run_id)}")

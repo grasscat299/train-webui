@@ -189,3 +189,21 @@ def test_job_log_unknown_job_404(app_factory):
     client = TestClient(app)
     resp = client.get("/api/jobs/no_such_job/log")
     assert resp.status_code == 404
+
+
+def test_graceful_stop_requests_file_then_poll_marks_stopped(app_factory):
+    from train_webui.backend.remote.types import JobState
+    app, settings, remote = app_factory()
+    client = TestClient(app)
+    run = _draft_and_start(client, settings)
+    pid = next(iter(remote.poll_results))
+    resp = client.post(f"/api/runs/{run['run_id']}/stop?graceful=true")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "running"  # 頼んだだけ。まだ止まっていない
+    assert len(remote.stop_requests) == 1 and remote.stops == []
+    # 学習が重みを保存して exit 0 で終わったら、finished でなく stopped
+    remote.poll_results[pid] = JobState(alive=False, exit_code=0)
+    job = app.state.job_manager._db.list_jobs_for_run(run["run_id"])[0]
+    app.state.job_manager._poll_one_job(job)
+    body = client.get(f"/api/runs/{run['run_id']}").json()
+    assert body["status"] == "stopped"
