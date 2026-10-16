@@ -128,7 +128,7 @@ export function MonitorPanel() {
         <>
           <h3>GPU</h3>
           <Gpus data={data} history={history} />
-          <h3>CPU（コアごと）{data.cpu_total !== null && `　全体 ${data.cpu_total.toFixed(0)}%`}{data.cpu_temp_c !== null && `　温度 ${data.cpu_temp_c.toFixed(0)}℃`}</h3>
+          <h3>CPU（コアごと）{data.cpu_total !== null && `　全体 ${data.cpu_total.toFixed(0)}%`}{data.cpu_temp_c != null && `　温度 ${data.cpu_temp_c.toFixed(0)}℃`}</h3>
           <div className="mon-cores">
             {data.cpu_cores.map((c, i) => (
               <Bar key={i} value={c} label={`${i}`} />
