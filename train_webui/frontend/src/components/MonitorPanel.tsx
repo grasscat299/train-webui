@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../api';
 import type { MachineInfo, MachinesResp, MonitorResp } from '../api';
 import { usePolling } from '../hooks/usePolling';
 
 const INTERVAL_MS = 2000;
+const HISTORY = 150; // グラフに残す点数（2秒ごと = 約5分）
+
+interface GpuPoint { t: number; util: number | null; mem: number | null; temp: number | null }
 
 // 使用率(%)を横棒で出す。高いほど色を変える
 function Bar({ value, label, detail }: { value: number | null; label: string; detail?: string }) {
@@ -21,24 +25,42 @@ function Bar({ value, label, detail }: { value: number | null; label: string; de
   );
 }
 
-function Gpus({ data }: { data: MonitorResp }) {
+// GPU ごとに、使用率・メモリ(%)・温度の推移を折れ線で出す（温度は右軸）。数値は現在値
+function GpuChart({ points }: { points: GpuPoint[] }) {
+  return (
+    <div className="mon-chart">
+      <ResponsiveContainer width="100%" height={180}>
+        <LineChart data={points} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+          <XAxis dataKey="t" tickFormatter={(t: number) => `${Math.round(t - points[points.length - 1].t)}s`} fontSize={11} />
+          <YAxis yAxisId="pct" domain={[0, 100]} unit="%" width={44} fontSize={11} />
+          <YAxis yAxisId="temp" orientation="right" domain={[20, 100]} unit="℃" width={48} fontSize={11} />
+          <Tooltip labelFormatter={(t) => `${Math.round(Number(t) - points[points.length - 1].t)} 秒`} formatter={(v) => (v == null ? 'N/A' : Number(v).toFixed(0))} />
+          <Legend />
+          <Line yAxisId="pct" dataKey="util" name="使用率(%)" stroke="#4c8dff" dot={false} isAnimationActive={false} />
+          <Line yAxisId="pct" dataKey="mem" name="メモリ(%)" stroke="#8e6bd8" dot={false} isAnimationActive={false} />
+          <Line yAxisId="temp" dataKey="temp" name="温度(℃)" stroke="#d9534f" dot={false} isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function Gpus({ data, history }: { data: MonitorResp; history: Record<number, GpuPoint[]> }) {
   if (data.gpus.length === 0) return <p className="mon-note">GPU が見つかりません（nvidia-smi が使えません）。</p>;
   return (
     <>
       {data.gpus.map((g) => {
-        const memPct = g.mem_used_mib !== null && g.mem_total_mib ? (100 * g.mem_used_mib) / g.mem_total_mib : null;
-        const extra = [g.temp_c !== null ? `${g.temp_c.toFixed(0)}℃` : null, g.power_w !== null ? `${g.power_w.toFixed(0)}W` : null]
-          .filter(Boolean)
-          .join(' / ');
+        const extra = [
+          g.util !== null ? `使用率 ${g.util.toFixed(0)}%` : null,
+          g.mem_used_mib !== null && g.mem_total_mib !== null ? `メモリ ${g.mem_used_mib.toFixed(0)} / ${g.mem_total_mib.toFixed(0)} MiB` : null,
+          g.temp_c !== null ? `${g.temp_c.toFixed(0)}℃` : null,
+          g.power_w !== null ? `${g.power_w.toFixed(0)}W` : null,
+        ].filter(Boolean).join(' / ');
         return (
           <div key={g.index} className="mon-gpu">
             <div className="mon-gpu-name">GPU {g.index}: {g.name}{extra && `（${extra}）`}</div>
-            <Bar value={g.util} label="使用率" />
-            <Bar
-              value={memPct}
-              label="メモリ"
-              detail={g.mem_used_mib !== null && g.mem_total_mib !== null ? `${g.mem_used_mib.toFixed(0)} / ${g.mem_total_mib.toFixed(0)} MiB` : undefined}
-            />
+            {(history[g.index]?.length ?? 0) > 1 && <GpuChart points={history[g.index]} />}
           </div>
         );
       })}
@@ -79,6 +101,22 @@ export function MonitorPanel() {
   const { data: machines } = usePolling(() => api.getMachines(), 5000, []);
   const current = machine || machines?.default || '';
   const { data, error } = usePolling(() => api.getMonitor(current || null), INTERVAL_MS, [current]);
+  // GPU の推移。台を切り替えたら捨てる（取得のたびに1点足す）
+  const [history, setHistory] = useState<Record<number, GpuPoint[]>>({});
+  const startRef = useRef(Date.now());
+  useEffect(() => setHistory({}), [current]);
+  useEffect(() => {
+    if (!data) return;
+    const t = (Date.now() - startRef.current) / 1000;
+    setHistory((h) => {
+      const next = { ...h };
+      for (const g of data.gpus) {
+        const mem = g.mem_used_mib !== null && g.mem_total_mib ? (100 * g.mem_used_mib) / g.mem_total_mib : null;
+        next[g.index] = [...(h[g.index] ?? []), { t, util: g.util, mem, temp: g.temp_c }].slice(-HISTORY);
+      }
+      return next;
+    });
+  }, [data]);
   return (
     <div className="mon-panel">
       <h2>学習用PCの使用状況</h2>
@@ -89,8 +127,8 @@ export function MonitorPanel() {
       {data && (
         <>
           <h3>GPU</h3>
-          <Gpus data={data} />
-          <h3>CPU（コアごと）{data.cpu_total !== null && `　全体 ${data.cpu_total.toFixed(0)}%`}</h3>
+          <Gpus data={data} history={history} />
+          <h3>CPU（コアごと）{data.cpu_total !== null && `　全体 ${data.cpu_total.toFixed(0)}%`}{data.cpu_temp_c !== null && `　温度 ${data.cpu_temp_c.toFixed(0)}℃`}</h3>
           <div className="mon-cores">
             {data.cpu_cores.map((c, i) => (
               <Bar key={i} value={c} label={`${i}`} />

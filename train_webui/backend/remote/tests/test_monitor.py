@@ -35,3 +35,11 @@ def test_monitor_ssh_failure_raises(settings_factory):
     runner = FakeRunner(responses=[fail(stderr=b"connection refused")])
     with pytest.raises(RemoteError):
         RemoteController(settings_factory(), runner=runner).monitor()
+
+
+def test_monitor_cpu_temp_prefers_package_sensor(settings_factory):
+    sensors = "nvme|Composite|40000\ncoretemp|Core 0|61000\ncoretemp|Package id 0|66000\nacpitz||27000\n"
+    out = _out() + b"---\n" + sensors.encode()
+    m = RemoteController(settings_factory(), runner=FakeRunner(responses=[ok(stdout=out)])).monitor()
+    assert m["cpu_temp_c"] == 66.0
+    assert RemoteController(settings_factory(), runner=FakeRunner(responses=[ok(stdout=_out())])).monitor()["cpu_temp_c"] is None

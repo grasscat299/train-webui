@@ -732,6 +732,7 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
 .mon-panel h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted); }
 .mon-gpu { margin-bottom: 12px; }
 .mon-gpu-name { font-size: 13px; margin-bottom: 4px; }
+.mon-chart { max-width: 760px; margin: 4px 0 8px; }
 .mon-note { color: var(--muted); font-size: 13px; }
 .mon-cores { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); column-gap: 24px; }
 .mon-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 3px 0; }
