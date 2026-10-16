@@ -403,7 +403,14 @@ def create_app(
             return requested
         parent_machine = job_manager.machine_of(parent)
         if requested is not None and requested != parent_machine:
-            raise HTTPException(400, f"引き継ぎ元の run の重みは {parent_machine} にあるため、同じ台でしか起動できません")
+            # 台を指定されたら、元の run の重みをその台に送る（ubun 間は直接つながらないので、このサーバーを中継する）
+            try:
+                data = registry.get(parent_machine).read_checkpoint(parent_id)
+                registry.get(requested).write_checkpoint(parent_id, data)
+            except Exception as e:  # noqa: BLE001 - 中継の失敗は 400 で理由を返す（run は起動しない）
+                raise HTTPException(
+                    400, f"引き継ぎ元の run の重みを {parent_machine} から {requested} に送れませんでした: {e}") from e
+            return requested
         return parent_machine
 
     # project の検出はリポジトリ全体を走査して main.py を解析するので重い（数十ms）。frontend は数秒ごとに

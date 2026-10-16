@@ -89,12 +89,20 @@ def test_infer_and_continue_stay_on_the_machine_with_the_weights(tmp_path):
     resp = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]})
     assert resp.status_code == 200 and resp.json()["machine"] == "b1"
     assert len(fakes["b1"].launches) == 2 and not fakes["a1"].launches
-    # 引き継ぎ学習の下書きは、元の run と違う台を指定すると断る
+    # 引き継ぎ学習の下書き: 台を指定しなければ元の run と同じ台。違う台を指定すると、元の run の重みをその台に送って起動する
     app.state.db.update_run(run["run_id"], machine="b1")
+    fakes["b1"].checkpoints[run["run_id"]] = b"TAR-BYTES"
     child = _draft(client)
     app.state.db.update_run(child["run_id"], parent_run_id=run["run_id"])
+    fakes["b1"].fail_checkpoint = True          # 重みを送れなければ、理由を返して起動しない
     bad = client.post(f"/api/runs/{child['run_id']}/start", params={"machine": "a1"})
-    assert bad.status_code == 400 and "b1" in bad.json()["detail"]
+    assert bad.status_code == 400 and "b1" in bad.json()["detail"] and "a1" in bad.json()["detail"]
+    assert not fakes["a1"].launches
+    fakes["b1"].fail_checkpoint = False
+    ok = client.post(f"/api/runs/{child['run_id']}/start", params={"machine": "a1"})
+    assert ok.status_code == 200 and ok.json()["machine"] == "a1"
+    assert fakes["a1"].checkpoints[run["run_id"]] == b"TAR-BYTES"          # 重みが a1 に置かれた
+    assert fakes["a1"].launches[0].parent_run_id == run["run_id"]
 
 
 def test_machines_endpoint_and_monitor_selection(tmp_path):

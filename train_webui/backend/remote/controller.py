@@ -64,6 +64,23 @@ class RemoteController:
                              timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "runのファイルの削除")
 
+    def read_checkpoint(self, run_id: str) -> bytes:
+        """run の重み（artifacts/*.pt）を tar で読み出す。別の台へ送る（write_checkpoint）ために使う。"""
+        if not _SAFE_ID.fullmatch(run_id):
+            raise RemoteError(f"run_id が不正です: {run_id!r}")
+        d = shlex.quote(f"{self._settings.remote.run_root}/{run_id}")
+        proc = self._ssh_run(f"cd {d} && tar c artifacts/*.pt", timeout=_SSH_TIMEOUT_SEC * 10)
+        self._check(proc, "重みの読み出し")
+        return proc.stdout or b""
+
+    def write_checkpoint(self, run_id: str, data: bytes) -> None:
+        """read_checkpoint の tar を、この台の run_root/<run_id>/ に展開する（引き継ぎ学習の元の重みを、別の台に置くため）。"""
+        if not _SAFE_ID.fullmatch(run_id):
+            raise RemoteError(f"run_id が不正です: {run_id!r}")
+        d = shlex.quote(f"{self._settings.remote.run_root}/{run_id}")
+        proc = self._ssh_run(f"mkdir -p {d} && tar x -C {d}", input=data, timeout=_SSH_TIMEOUT_SEC * 10)
+        self._check(proc, "重みの書き込み")
+
     def launch(self, spec: LaunchSpec) -> LaunchResult:
         r = self._settings.remote
         job_dir = f"{r.run_root}/{spec.run_id}/{spec.job_id}"

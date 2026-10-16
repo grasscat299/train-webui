@@ -135,3 +135,28 @@ def test_launch_isolates_code_per_job_when_parallel(settings_factory):
     assert f"cat > {job_dir}/code/src/world_model_v2/config.toml" in write
     assert f"cd {job_dir}/code &&" in launch
     assert result.pid == 777
+
+
+def test_checkpoint_relay_commands_and_safe_ids():
+    """read_checkpoint は元の台で tar c、write_checkpoint は送り先で tar x（標準入力で渡す）。run_id は検査する。"""
+    import pytest
+
+    from ..controller import RemoteController
+    from ..errors import RemoteError
+    from .conftest import FakeRunner, make_settings, ok
+    from pathlib import Path
+
+    settings = make_settings(Path("/tmp/repo"))
+    runner = FakeRunner([ok(stdout=b"TARBYTES"), ok()])
+    rc = RemoteController(settings, runner=runner)
+    assert rc.read_checkpoint("20261016_190753") == b"TARBYTES"
+    cmd = runner.calls[0]["args"][-1]
+    assert "tar c artifacts/*.pt" in cmd and "/home/user/train_webui_runs/20261016_190753" in cmd
+    rc.write_checkpoint("20261016_190753", b"TARBYTES")
+    w = runner.calls[1]
+    assert "tar x -C" in w["args"][-1] and w["input"] == b"TARBYTES"
+    for bad in ("../x", "a b", ""):
+        with pytest.raises(RemoteError):
+            rc.read_checkpoint(bad)
+        with pytest.raises(RemoteError):
+            rc.write_checkpoint(bad, b"")

@@ -71,6 +71,12 @@ class RemoteControllerProtocol(Protocol):
     def remove_run_files(self, run_id: str) -> None:
         """学習用PCの <run_root>/<run_id>/（重み・ログなど）を消す。無ければ何もしない。"""
 
+    def read_checkpoint(self, run_id: str) -> bytes:
+        """学習用PCの <run_root>/<run_id>/artifacts/*.pt を tar で読み出す（別の台へ送る用）。"""
+
+    def write_checkpoint(self, run_id: str, data: bytes) -> None:
+        """read_checkpoint の tar を <run_root>/<run_id>/ に展開する（引き継ぎ学習の元の重みを別の台に置く用）。"""
+
     def launch(self, spec: LaunchSpec) -> LaunchResult:
         """config.toml を書き込み、setsid+nohup でジョブを起動する（sync_code は呼ばない）。"""
 
