@@ -22,6 +22,10 @@ stop_timeout_sec = 10                                 # SIGTERM後、SIGKILLま�
 # unreachable_retry_sec = 30                                 # 画面の更新では、つながらなかった台をこの秒数は測り直さない
 # other_grace_sec = 300                                       # 他の人の使用が見えなくなってから、使用中とみなし続ける秒数
 
+[monitor]                                  # Monitor タブの取得先（gpu5 の lab_monitor server。tailscale の IP）
+url         = "http://100.100.0.15:8080"
+timeout_sec = 8
+
 [server]                                   # ローカルPC(WSL)のWebUI server
 host       = "0.0.0.0"
 port       = 8000

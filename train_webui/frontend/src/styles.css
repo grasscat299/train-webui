@@ -823,3 +823,36 @@ body.resizing-panel-x { cursor: ew-resize; user-select: none; }
   white-space: pre-line;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
+
+/* Monitor タブ（lab_monitor と同じ見た目）。色は lab_monitor/static/index.html と同じ値（系列色は検証済みのカテゴリ色 1〜3） */
+.labmon {
+  --lm-card: var(--panel); --lm-fg: var(--text); --lm-mut: #52514e; --lm-grid: #d9d8d3;
+  --lm-free: #0f8a4f; --lm-busy: #d23a3a; --lm-off: #8a8a85; --lm-s1: #2a78d6; --lm-s2: #eb6834; --lm-s3: #1baf7a;
+}
+:root[data-theme="dark"] .labmon {
+  --lm-mut: #c3c2b7; --lm-grid: #34332f; --lm-free: #3ec97c; --lm-busy: #ff6b6b; --lm-off: #6f6f69; --lm-s1: #3987e5; --lm-s2: #d95926; --lm-s3: #199e70;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] .labmon {
+    --lm-mut: #c3c2b7; --lm-grid: #34332f; --lm-free: #3ec97c; --lm-busy: #ff6b6b; --lm-off: #6f6f69; --lm-s1: #3987e5; --lm-s2: #d95926; --lm-s3: #199e70;
+  }
+}
+.lm-head { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; margin-bottom: 12px; }
+.lm-head h2 { margin: 0; }
+.lm-sub { color: var(--lm-mut); font-size: 13px; }
+.lm-sub select { background: var(--panel); color: var(--text); border: 1px solid var(--border-strong); border-radius: 6px; padding: 2px 6px; }
+.lm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+.lm-card { background: var(--lm-card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.lm-top { display: flex; justify-content: space-between; align-items: center; }
+.lm-name { font-weight: 700; font-size: 17px; }
+.lm-lab { color: var(--lm-mut); font-size: 12px; }
+.lm-badge { padding: 2px 12px; border-radius: 99px; color: #fff; font-weight: 700; font-size: 13px; }
+.lm-badge.free { background: var(--lm-free); } .lm-badge.busy { background: var(--lm-busy); } .lm-badge.off { background: var(--lm-off); }
+.lm-bar { height: 8px; background: var(--lm-grid); border-radius: 4px; margin: 3px 0 8px; overflow: hidden; }
+.lm-bar i { display: block; height: 100%; background: var(--lm-s1); border-radius: 4px; }
+.lm-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--lm-mut); }
+.lm-row b { color: var(--lm-fg); }
+.lm-canvas { width: 100%; height: 120px; margin-top: 6px; display: block; }
+.lm-lg { margin-right: 12px; }
+.lm-k { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.lm-err { color: var(--lm-mut); font-size: 13px; margin: 10px 0; }

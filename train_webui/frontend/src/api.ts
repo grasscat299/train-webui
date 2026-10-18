@@ -242,6 +242,41 @@ export interface MonitorResp {
   gpus: MonitorGpu[];
 }
 
+// gpu5 の lab_monitor server の応答（GET /api/lab/now, /api/lab/history。形は lab_monitor の API と同じ）。
+// 取得に失敗した台は error だけが入り、数値は無い。in_use は GPU メモリのしきい値で判定した使用中(1)/空き(0)
+export interface LabNow {
+  name: string;
+  title: string;
+  label: string;
+  ts?: number;
+  error?: string;
+  cpu?: number | null;
+  gpu_util?: number | null;
+  vram_used?: number | null;
+  vram_total?: number | null;
+  temp?: number | null;
+  cpu_temp?: number | null;
+  load?: number;
+  ram_used?: number;
+  ram_total?: number;
+  in_use?: number | null;
+}
+
+export interface LabHistoryRow {
+  ts: number;
+  ok: number;
+  gpu_util: number | null;
+  vram_used: number | null;
+  vram_total: number | null;
+  temp: number | null;
+  cpu: number | null;
+  cpu_temp: number | null;
+  load: number | null;
+  ram_used: number | null;
+  ram_total: number | null;
+  in_use: number | null;
+}
+
 export interface Api {
   getTree(): Promise<ProjectNode[]>;
   rescan(): Promise<ProjectNode[]>;
@@ -272,6 +307,8 @@ export interface Api {
   // 指標・グラフの説明（名前 → 説明。project の metric_docs.toml）。マウスを乗せたときの表示用
   getMetricDocs(project: string): Promise<Record<string, string>>;
   getMonitor(machine?: string | null): Promise<MonitorResp>;
+  getLabNow(): Promise<LabNow[]>;
+  getLabHistory(machine: string, hours: number): Promise<LabHistoryRow[]>;
   // omitStepLines: 横軸が step の line は点を返さない。label: そのグラフだけ取る
   getPlots(runId: string, afterId?: number | null, opts?: { omitStepLines?: boolean; label?: string }): Promise<Plot[]>;
   // line のグラフを x の幅ごとに平均して取る。bin は "epoch"（config の steps_per_epoch）か幅の数値
@@ -372,6 +409,8 @@ const realApi: Api = {
     return request<Result[]>(`/api/runs/${encodeURIComponent(runId)}/results${qs ? `?${qs}` : ''}`);
   },
   getMonitor: (machine) => request<MonitorResp>(`/api/monitor${machine ? `?machine=${encodeURIComponent(machine)}` : ''}`),
+  getLabNow: () => request<LabNow[]>('/api/lab/now'),
+  getLabHistory: (machine, hours) => request<LabHistoryRow[]>(`/api/lab/history?machine=${encodeURIComponent(machine)}&hours=${hours}`),
   getMetricDocs: (project) => request<Record<string, string>>(`/api/metric_docs?project=${encodeURIComponent(project)}`),
   getLabels: (runIds) =>
     request<LabelInfo[]>(`/api/labels?run_ids=${encodeURIComponent(runIds.join(','))}`),

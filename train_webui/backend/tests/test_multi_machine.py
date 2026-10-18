@@ -173,3 +173,44 @@ def test_metric_docs_endpoint(tmp_path):
     assert client.get("/api/metric_docs", params={"project": "nope"}).status_code == 404
     (root / "proj_a" / "metric_docs.toml").unlink()
     assert client.get("/api/metric_docs", params={"project": "proj_a"}).json() == {}   # 無ければ空
+
+
+def test_lab_monitor_proxy(tmp_path):
+    """Monitor タブは gpu5 の lab_monitor server の応答を、形を変えずに中継する。未設定は 503、つながらなければ 502。"""
+    import http.server
+    import json
+    import threading
+    from train_webui.backend.settings import MonitorSettings
+
+    seen = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.path)
+            body = json.dumps([{"name": "gpu1", "title": "ubuntu1", "gpu_util": 3.0}]).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        def make(url):
+            root = tmp_path / "repo"
+            root.mkdir(exist_ok=True)
+            write_project(root, "proj_a")
+            s = dataclasses.replace(make_settings(tmp_path, root), monitor=MonitorSettings(url=url, timeout_sec=2))
+            return TestClient(create_app(s, remote=RemoteRegistry({"a1": FakeRemote()}, "a1"), start_background=False))
+
+        c = make(f"http://127.0.0.1:{srv.server_port}")
+        assert c.get("/api/lab/now").json()[0]["title"] == "ubuntu1"
+        assert c.get("/api/lab/history", params={"machine": "gpu1", "hours": 6}).status_code == 200
+        assert seen == ["/api/now?", "/api/history?machine=gpu1&hours=6.0"]
+        assert make("").get("/api/lab/now").status_code == 503
+        assert make("http://127.0.0.1:1").get("/api/lab/now").status_code == 502
+    finally:
+        srv.shutdown()
