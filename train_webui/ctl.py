@@ -133,7 +133,7 @@ def cmd_machines(api: Api, args: argparse.Namespace) -> None:
     data = api.call("GET", "/api/machines?fresh=true")
     for m in data["machines"]:
         state = "OK  " if m["available"] else "不可"
-        use = "接続不可" if not m["reachable"] else f"他の人 {m['other_mib']} MiB / 自分のジョブ {m['own_jobs']}"
+        use = "接続不可" if not m["reachable"] else f"GPU {m['gpu_util_pct']:.0f}% CPU {m['cpu_util_pct']:.0f}% / 自分のジョブ {m['own_jobs']}"
         print(f"{state} {m['name']:<8} priority={m['priority']:<4} {use}" + (f"  … {m['reason']}" if m["reason"] else ""))
     print(f"自動選択される台: {data['selected'] or 'なし（今は起動できません）'}")
 

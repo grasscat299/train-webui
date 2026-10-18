@@ -145,7 +145,9 @@ class RemoteController:
         # 末尾の `; true` は cat が run.exit 未生成時に非0終了してもコマンド全体の終了コードを汚さないため
         cmd = (
             f"if kill -0 {int(pid)} 2>/dev/null; then echo ALIVE; else echo DEAD; fi; "
-            f"cat {quoted_job_dir}/run.exit 2>/dev/null; true"
+            f"cat {quoted_job_dir}/run.exit 2>/dev/null; "
+            # 終わったジョブの lease（この台を使っているという記録）を消す。job_dir = <run_root>/<run_id>/<job_id>
+            f"kill -0 {int(pid)} 2>/dev/null || rm -f {shlex.quote(self._lease_dir())}/$(basename $(dirname {quoted_job_dir})); true"
         )
         proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "ジョブ状態の確認")
@@ -166,30 +168,42 @@ class RemoteController:
         data = proc.stdout
         return data, offset + len(data)
 
+    def _lease_dir(self) -> str:
+        return f"{self._settings.remote.run_root}/../leases"
+
+    def clear_leases(self) -> None:
+        proc = self._ssh_run(f"rm -f {shlex.quote(self._lease_dir())}/* 2>/dev/null; true", timeout=_SSH_TIMEOUT_SEC)
+        self._check(proc, "lease の掃除")
+
     def gpu_usage(self) -> GpuUsage:
-        # instance は --containall で PID 名前空間が分かれているため、ps では他の人のプロセスは見えない。
-        # nvidia-smi のメモリ使用量は GPU 全体の値なので、そこから「ps にも見える（= 自分たちの）プロセス」の
-        # 分を引いた残りを、他の人の使用量とみなす。
+        # 「他の人が使っているか」は、使用メモリではなく GPU・CPU の使用率で判断する。自分たちの使用は lease（ジョブの起動時に書く記録）で
+        # 判断する。lease が無いのに使用率が高ければ他の人。
         cmd = (
             "nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits; echo ---; "
-            "nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits; echo ---; "
-            "ps -eo pid --no-headers; echo ---; "
-            "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits"
+            "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits; echo ---; "
+            "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits; echo ---; "
+            "head -n1 /proc/stat; sleep 0.5; head -n1 /proc/stat; echo ---; "
+            f"ls {shlex.quote(self._lease_dir())} 2>/dev/null | wc -l"
         )
         proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
-        self._check(proc, "GPU使用状況の確認")
+        self._check(proc, "GPU/CPU使用状況の確認")
         parts = proc.stdout.decode("utf-8", errors="replace").split("---")
-        if len(parts) not in (3, 4):
+        if len(parts) != 5:
             raise RemoteError(f"GPU使用状況の出力を解釈できませんでした: {proc.stdout[-500:]!r}")
-        total = sum(int(v) for v in parts[0].split() if v.strip().isdigit())
-        own_pids = {int(v) for v in parts[2].split() if v.strip().isdigit()}
-        own = 0
-        for line in parts[1].splitlines():
-            cols = [c.strip() for c in line.split(",")]
-            if len(cols) == 2 and cols[0].isdigit() and cols[1].isdigit() and int(cols[0]) in own_pids:
-                own += int(cols[1])
-        total_mem = sum(int(v) for v in parts[3].split() if v.strip().isdigit()) if len(parts) == 4 else 0
-        return GpuUsage(total_used_mib=total, own_mib=own, total_mib=total_mem)
+
+        def ints(t: str) -> list[int]:
+            return [int(v) for v in t.split() if v.strip().isdigit()]
+
+        used, total_mem = sum(ints(parts[0])), sum(ints(parts[2]))
+        gpu_util = float(max(ints(parts[1]) or [0]))
+        cpu = [list(map(int, ln.split()[1:])) for ln in parts[3].strip().splitlines() if ln.startswith("cpu")]
+        cpu_util = 0.0
+        if len(cpu) == 2:
+            tot = sum(cpu[1]) - sum(cpu[0])
+            idle = (cpu[1][3] + cpu[1][4]) - (cpu[0][3] + cpu[0][4])
+            cpu_util = 100.0 * (tot - idle) / tot if tot > 0 else 0.0
+        leases = (ints(parts[4]) or [0])[0]
+        return GpuUsage(total_used_mib=used, own_mib=0, total_mib=total_mem, gpu_util_pct=gpu_util, cpu_util_pct=cpu_util, leases=leases)
 
     def monitor(self) -> dict:
         # /proc/stat を 0.5 秒あけて2回読み、差分からコアごとの使用率を出す。GPU は nvidia-smi を1回
@@ -252,7 +266,10 @@ class RemoteController:
             f"echo $? > {quoted_job_dir}/run.exit"
         )
         # `a && b && c &` だと連結全体が背景化され mkdir 前に run.pid を書きうるので、背景化部分だけ括弧で囲む
+        lease = shlex.quote(f"{self._lease_dir()}/{spec.run_id}")
         return (
+            f"mkdir -p {shlex.quote(self._lease_dir())} && "
+            f"echo {shlex.quote(json.dumps({'run_id': spec.run_id, 'job_id': spec.job_id, 'kind': spec.kind}))} > {lease} && "
             f"cd {shlex.quote(code_dir or r.repo_dir)} && mkdir -p {quoted_job_dir} {shlex.quote(f'{r.run_root}/{spec.run_id}/artifacts')} && "
             f"( setsid nohup sh -c {shlex.quote(inner)} > {quoted_job_dir}/run.log 2>&1 < /dev/null & "
             f"echo $! > {quoted_job_dir}/run.pid ) && cat {quoted_job_dir}/run.pid"

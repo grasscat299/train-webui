@@ -84,6 +84,9 @@ class FakeRemote:
         chunk = data[offset:]
         return chunk, offset + len(chunk)
 
+    def clear_leases(self) -> None:
+        self.cleared_leases = getattr(self, 'cleared_leases', 0) + 1
+
     def gpu_usage(self) -> GpuUsage:
         if self.fail_gpu:
             raise RuntimeError("ssh に失敗しました（fake）")

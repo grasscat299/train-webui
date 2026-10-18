@@ -47,7 +47,8 @@ export interface MachineInfo {
   priority: number;
   reachable: boolean;
   own_jobs: number;
-  other_mib: number;
+  gpu_util_pct: number;
+  cpu_util_pct: number;
   free_mib: number | null;
   total_mib: number | null;
   available: boolean;

@@ -4,23 +4,26 @@ from ..controller import RemoteController
 from ..errors import RemoteError
 from .conftest import FakeRunner, fail, ok
 
+CPU0 = b"cpu  1000 0 1000 8000 0 0 0 0 0 0\n"
+CPU1_BUSY = b"cpu  1500 0 1500 8100 0 0 0 0 0 0\n"   # 差分: 全体 1100、idle 100 → 使用率 約 90.9%
 
-def test_gpu_usage_subtracts_own_processes(settings_factory):
-    # GPU全体 5000MiB のうち、pid 1457（ps にも見える = 自分たち）が 1142MiB、pid 99999 は ps に無い（= 他の人）
-    stdout = b"5000\n---\n1457, 1142\n99999, 3000\n---\n    1\n   14\n 1457\n"
-    runner = FakeRunner(responses=[ok(stdout=stdout)])
+
+def _out(mem=b"5000\n", util=b"3\n", total=b"32607\n", cpu=CPU0 + CPU1_BUSY, leases=b"0\n"):
+    return mem + b"---\n" + util + b"---\n" + total + b"---\n" + cpu + b"---\n" + leases
+
+
+def test_gpu_usage_reads_utilization_cpu_and_leases(settings_factory):
+    runner = FakeRunner(responses=[ok(stdout=_out(util=b"45\n10\n", leases=b"2\n"))])
     usage = RemoteController(settings_factory(), runner=runner).gpu_usage()
-    assert usage.total_used_mib == 5000
-    assert usage.own_mib == 1142
-    assert usage.other_mib == 3858
+    assert (usage.total_used_mib, usage.total_mib, usage.gpu_util_pct, usage.leases) == (5000, 32607, 45.0, 2)
+    assert usage.cpu_util_pct == pytest.approx(90.909, abs=0.01)
     cmd = runner.calls[0]["args"][-1]
-    assert "nvidia-smi --query-gpu=memory.used" in cmd and "ps -eo pid" in cmd
+    assert "utilization.gpu" in cmd and "/proc/stat" in cmd and "leases" in cmd
 
 
-def test_gpu_usage_sums_multiple_gpus_and_handles_no_apps(settings_factory):
-    runner = FakeRunner(responses=[ok(stdout=b"100\n200\n---\n---\n1\n")])
-    usage = RemoteController(settings_factory(), runner=runner).gpu_usage()
-    assert (usage.total_used_mib, usage.own_mib, usage.other_mib) == (300, 0, 300)
+def test_gpu_usage_sums_multiple_gpus_memory(settings_factory):
+    runner = FakeRunner(responses=[ok(stdout=_out(mem=b"100\n200\n"))])
+    assert RemoteController(settings_factory(), runner=runner).gpu_usage().total_used_mib == 300
 
 
 def test_gpu_usage_ssh_failure_raises(settings_factory):
@@ -29,8 +32,12 @@ def test_gpu_usage_ssh_failure_raises(settings_factory):
         RemoteController(settings_factory(), runner=runner).gpu_usage()
 
 
-def test_gpu_usage_reads_total_memory_when_present(settings_factory):
-    stdout = b"6011\n---\n1457, 5962\n---\n 1457\n---\n32607\n"
-    runner = FakeRunner(responses=[ok(stdout=stdout)])
-    usage = RemoteController(settings_factory(), runner=runner).gpu_usage()
-    assert (usage.total_used_mib, usage.total_mib, usage.free_mib) == (6011, 32607, 26596)
+def test_launch_writes_lease_and_poll_removes_it_when_dead(settings_factory):
+    from ..types import LaunchSpec
+    c = RemoteController(settings_factory(), runner=FakeRunner(responses=[]))
+    spec = LaunchSpec(run_id="20261018_000000", job_id="j1", kind="train", project_dir="src/p", config_toml="", parent_run_id=None)
+    cmd = c._build_launch_command(spec, "/r/runs/20261018_000000/j1")
+    assert "leases/20261018_000000" in cmd and cmd.index("leases/") < cmd.index("setsid")
+    runner = FakeRunner(responses=[ok(stdout=b"DEAD\n0\n")])
+    RemoteController(settings_factory(), runner=runner).poll(1234, "/r/runs/20261018_000000/j1")
+    assert "rm -f" in runner.calls[0]["args"][-1] and "leases" in runner.calls[0]["args"][-1]

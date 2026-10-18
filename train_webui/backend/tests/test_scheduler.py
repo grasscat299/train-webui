@@ -5,7 +5,7 @@ RULE = Rule(max_parallel_jobs=1, job_headroom_mib=4096, reserve_groups=GROUPS)
 
 
 def st(name, priority=0, reachable=True, own=0, other=False, free=None):
-    return MachineState(name, priority, reachable, own, other, free, other_mib=2000 if other else 0)
+    return MachineState(name, priority, reachable, own, other, free, gpu_util_pct=80.0 if other else 0.0)
 
 
 def fleet(**over):

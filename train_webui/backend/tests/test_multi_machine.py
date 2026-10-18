@@ -25,7 +25,7 @@ def _setup(tmp_path, groups=(("a1", "a2"), ("b1", "b2")), priorities=None):
     )
     fakes = {n: FakeRemote() for n in machines}
     for f in fakes.values():
-        f.gpu = GpuUsage(total_used_mib=0, own_mib=0, total_mib=BIG)
+        f.gpu = GpuUsage(total_used_mib=0, own_mib=0, gpu_util_pct=0.0, total_mib=BIG)
     registry = RemoteRegistry(fakes, "a1")
     app = create_app(settings, remote=registry, start_background=False)
     return app, TestClient(app), fakes
@@ -48,7 +48,7 @@ def test_auto_selects_highest_priority_and_records_machine(tmp_path):
 
 def test_others_on_a1_skips_whole_group(tmp_path):
     app, client, fakes = _setup(tmp_path)
-    fakes["a1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+    fakes["a1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
     run = _draft(client)
     resp = client.post(f"/api/runs/{run['run_id']}/start")
     assert resp.status_code == 200 and resp.json()["machine"] == "b1"
@@ -57,7 +57,7 @@ def test_others_on_a1_skips_whole_group(tmp_path):
 
 def test_explicit_machine_and_rule_rejection(tmp_path):
     app, client, fakes = _setup(tmp_path)
-    fakes["a1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+    fakes["a1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
     run = _draft(client)
     resp = client.post(f"/api/runs/{run['run_id']}/start", params={"machine": "a2"})
     assert resp.status_code == 409 and "チーム用" in resp.json()["detail"]
@@ -69,7 +69,7 @@ def test_explicit_machine_and_rule_rejection(tmp_path):
 def test_all_unavailable_lists_reasons(tmp_path):
     app, client, fakes = _setup(tmp_path, priorities={"a1": 1, "b1": 1}, groups=())
     for f in fakes.values():
-        f.gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+        f.gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
     run = _draft(client)
     resp = client.post(f"/api/runs/{run['run_id']}/start")
     assert resp.status_code == 409 and "a1" in resp.json()["detail"] and "b1" in resp.json()["detail"]
@@ -108,7 +108,7 @@ def test_infer_and_continue_stay_on_the_machine_with_the_weights(tmp_path):
 
 def test_machines_endpoint_and_monitor_selection(tmp_path):
     app, client, fakes = _setup(tmp_path)
-    fakes["a1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+    fakes["a1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
     data = client.get("/api/machines", params={"fresh": True}).json()
     by = {m["name"]: m for m in data["machines"]}
     assert data["selected"] == "b1" and data["default"] == "a1"
@@ -124,9 +124,9 @@ def test_other_use_is_remembered_for_grace_period(tmp_path):
         app.state.settings, scheduler=SchedulerSettings(other_grace_sec=300.0, probe_ttl_sec=0))
     now = [0.0]
     mm = MachineManager(settings, RemoteRegistry(fakes, "a1"), lambda: {}, clock=lambda: now[0])
-    fakes["a1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+    fakes["a1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
     assert not mm.status()["machines"][0]["available"]
-    fakes["a1"].gpu = GpuUsage(total_used_mib=0, own_mib=0, total_mib=BIG)
+    fakes["a1"].gpu = GpuUsage(total_used_mib=0, own_mib=0, gpu_util_pct=0.0, total_mib=BIG)
     now[0] = 100.0
     assert not mm.status()["machines"][0]["available"]  # 猶予の間は使用中のまま
     now[0] = 400.0
@@ -228,7 +228,7 @@ def _finished_on(client, app, fakes, machine):
 def test_infer_falls_back_to_another_machine_and_sends_weights(tmp_path):
     app, client, fakes = _setup(tmp_path, groups=())
     run = _finished_on(client, app, fakes, "b1")
-    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)     # 重みのある b1 を他の人が使い始めた
+    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)     # 重みのある b1 を他の人が使い始めた
     resp = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]})
     assert resp.status_code == 200 and resp.json()["machine"] == "a1"             # 使える台（優先度の高い a1）で動く
     assert fakes["b1"].direct_pushes == [(run["run_id"], "mesh-a1", "/remote/run_root")]   # b1 から a1 へ重みを直接送った
@@ -245,7 +245,7 @@ def test_infer_falls_back_to_another_machine_and_sends_weights(tmp_path):
 def test_infer_fallback_relays_through_server_when_direct_fails_and_reports_failures(tmp_path):
     app, client, fakes = _setup(tmp_path, groups=())
     run = _finished_on(client, app, fakes, "b1")
-    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
     fakes["b1"].checkpoints[run["run_id"]] = b"TAR"
     fakes["b1"].fail_direct = True
     ok = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"], "machine": "a2"})
@@ -265,7 +265,7 @@ def test_infer_does_not_fall_back_when_source_unreachable_or_machine_given_and_n
     assert client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]}).status_code == 502
     fakes["b1"].fail_gpu = False
     for n in ("a1", "a2", "b2"):
-        fakes[n].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
-    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+        fakes[n].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
+    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
     r = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]})
     assert r.status_code == 409 and "代わりの台もありません" in r.json()["detail"]

@@ -59,10 +59,21 @@ class MachineManager:
             usages = list(pool.map(lambda n: self._probe(n, fresh), names))
         own = self._own_jobs()
         now = self._clock()
+        # 自分たちのジョブが無いのに残っている lease は古い記録なので掃除する（残すと他の人の使用を見落とす）
+        for name, usage in zip(names, usages):
+            if usage is not None and usage.leases > 0 and own.get(name, 0) == 0:
+                try:
+                    self._registry.get(name).clear_leases()
+                except Exception:  # noqa: BLE001
+                    pass
         grace = self._settings.scheduler.other_grace_sec
         out = []
         for name, usage in zip(names, usages):
-            current = usage is not None and usage.other_mib > self._settings.gpu_busy_threshold_mib
+            sc = self._settings.scheduler
+            # 他の人 = 自分たちの記録（lease・ジョブ）が無い台で、GPU か CPU の使用率が高いもの
+            mine = own.get(name, 0) > 0 or (usage is not None and usage.leases > 0)
+            current = (usage is not None and not mine
+                       and (usage.gpu_util_pct >= sc.gpu_util_busy_pct or usage.cpu_util_pct >= sc.cpu_util_busy_pct))
             if current:
                 self._last_other_at[name] = now
             seen = self._last_other_at.get(name)
@@ -71,7 +82,8 @@ class MachineManager:
                 name=name, priority=self._settings.machines[name].priority, reachable=usage is not None,
                 own_jobs=own.get(name, 0), other_active=recent,
                 free_mib=(usage.free_mib if usage is not None and usage.total_mib else None),
-                other_mib=usage.other_mib if usage is not None else 0,
+                gpu_util_pct=usage.gpu_util_pct if usage is not None else 0.0,
+                cpu_util_pct=usage.cpu_util_pct if usage is not None else 0.0,
             ), usage))
         return out
 
@@ -97,7 +109,7 @@ class MachineManager:
             "min_free": sc.min_free, "min_free_slack": (free_now - sc.min_free) if sc.min_free > 0 else None,
             "machines": [{
                 "name": s.name, "priority": s.priority, "reachable": s.reachable, "own_jobs": s.own_jobs,
-                "other_mib": s.other_mib, "other_active": s.other_active,
+                "gpu_util_pct": s.gpu_util_pct, "cpu_util_pct": s.cpu_util_pct, "other_active": s.other_active,
                 "free_mib": s.free_mib, "total_mib": usage.total_mib if usage else None,
                 "available": reasons[s.name] is None, "reason": reasons[s.name],
                 "group": next((list(g) for g in groups if s.name in g), None),

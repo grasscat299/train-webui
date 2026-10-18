@@ -35,6 +35,9 @@ class SchedulerSettings:
     always_free: tuple[str, ...] = ()
     # 他の人の使用が見えなくなってからも、これだけの秒数は使用中とみなす（学習の合間にメモリが空く瞬間があるため）
     other_grace_sec: float = 300.0
+    # 他の人が使っているとみなす使用率（自分たちの lease が無い台で、GPU か CPU のどちらかがこの値以上）。メモリ使用量では判断しない
+    gpu_util_busy_pct: float = 10.0
+    cpu_util_busy_pct: float = 30.0
     # GET /api/machines の結果を使い回す秒数（起動の判定は毎回測り直す）
     probe_ttl_sec: float = 5.0
     # つながらなかった台を、画面の更新（起動の判定ではない）で測り直すまでの秒数。不通の台の接続待ちで一覧が遅くならないように
@@ -116,6 +119,8 @@ def _parse_scheduler(raw: dict, machines: dict[str, RemoteSettings]) -> Schedule
         min_free=int(raw.get("min_free", 0)),
         always_free=tuple(str(n) for n in raw.get("always_free", [])),
         other_grace_sec=float(raw.get("other_grace_sec", 300)),
+        gpu_util_busy_pct=float(raw.get("gpu_util_busy_pct", 10)),
+        cpu_util_busy_pct=float(raw.get("cpu_util_busy_pct", 30)),
         probe_ttl_sec=float(raw.get("probe_ttl_sec", 5)),
         unreachable_retry_sec=float(raw.get("unreachable_retry_sec", 30)),
     )

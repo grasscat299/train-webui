@@ -21,7 +21,8 @@ class MachineState:
     own_jobs: int            # 自分（WebUI）のジョブでこの台で動いている数
     other_active: bool       # 他の人が使っている（直近も含む）
     free_mib: int | None     # GPU の空きメモリ。不明なら None
-    other_mib: int = 0       # 表示用
+    gpu_util_pct: float = 0.0  # 表示用
+    cpu_util_pct: float = 0.0  # 表示用
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,9 @@ def _reason(s: MachineState, by_name: dict[str, MachineState], rule: Rule) -> st
     if not s.reachable:
         return "接続できません"
     if s.other_active:
-        return f"他の人が使用中です（{s.other_mib} MiB）" if s.other_mib else "他の人が直近まで使用していました"
+        if s.gpu_util_pct or s.cpu_util_pct:
+            return f"他の人が使用中です（GPU {s.gpu_util_pct:.0f}% / CPU {s.cpu_util_pct:.0f}%）"
+        return "他の人が直近まで使用していました"
     if s.own_jobs >= max(1, rule.max_parallel_jobs):
         return "自分の別のジョブで満杯です"
     if s.own_jobs > 0 and s.free_mib is not None and s.free_mib < rule.job_headroom_mib:

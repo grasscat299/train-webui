@@ -49,7 +49,7 @@ def test_first_job_ignores_headroom_when_nothing_running(app_factory):
     app, settings, remote = app_factory(max_parallel_jobs=2)
     write_project(settings.repo_root, "proj_a")
     client = TestClient(app)
-    remote.gpu = GpuUsage(total_used_mib=30000, own_mib=0, total_mib=32000)
+    remote.gpu = GpuUsage(total_used_mib=30000, own_mib=0, gpu_util_pct=80.0, total_mib=32000)
     a = _draft(client)
     # 他の人が 30000 使っていて、そもそも他の人の使用量しきい値で断られる（空きメモリの確認とは別の理由）
     assert client.post(f"/api/runs/{a['run_id']}/start").status_code == 409

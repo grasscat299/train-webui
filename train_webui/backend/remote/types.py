@@ -45,6 +45,9 @@ class GpuUsage:
     total_used_mib: int  # nvidia-smi の GPU 全体の使用メモリ（コンテナの外のプロセスも含む。複数GPUなら合計）
     own_mib: int         # そのうち、コンテナ内から見える（= 自分たちの）プロセスが使っているメモリ
     total_mib: int = 0   # GPU の全メモリ（複数GPUなら合計）。0 = 不明（空きメモリの確認は飛ばす）
+    gpu_util_pct: float = 0.0  # GPU の使用率（複数GPUなら最大）。他の人が使っているかの判定に使う（メモリ量では判定しない）
+    cpu_util_pct: float = 0.0  # CPU 全体の使用率（0.5 秒のあいだの平均）
+    leases: int = 0            # この台に「自分たちが使っている」と書いた記録（lease）の数。ジョブの起動時に書き、終わると消す
 
     @property
     def free_mib(self) -> int:
@@ -103,4 +106,7 @@ class RemoteControllerProtocol(Protocol):
         """学習用PCの GPU（使用率・メモリ・温度・電力）と CPU のコアごとの使用率を返す（モニタのパネル用）。"""
 
     def gpu_usage(self) -> GpuUsage:
-        """学習用PCのGPUの使用メモリを、全体と自分たちのプロセスの分に分けて返す（起動前の使用中チェック用）。"""
+        """学習用PCの GPU・CPU の使用率と、自分たちの使用の記録（lease）の数を返す（起動前の使用中チェック用）。"""
+
+    def clear_leases(self) -> None:
+        """この台の lease をすべて消す（動いている自分たちのジョブが無いのに残っている古い記録の掃除）。"""

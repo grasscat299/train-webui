@@ -844,8 +844,8 @@ export const mockApi: Api = {
     default: 'gpu1',
     selected: 'gpu1',
     machines: [
-      { name: 'gpu1', priority: 100, reachable: true, own_jobs: 0, other_mib: 0, free_mib: 30000, total_mib: 32000, available: true, reason: null, group: ['gpu1', 'gpu5'] },
-      { name: 'gpu5', priority: 60, reachable: true, own_jobs: 0, other_mib: 9000, free_mib: 3000, total_mib: 12000, available: false, reason: '他の人が使用中です（9000 MiB）', group: ['gpu1', 'gpu5'] },
+      { name: 'gpu1', priority: 100, reachable: true, own_jobs: 0, gpu_util_pct: 0, cpu_util_pct: 0, free_mib: 30000, total_mib: 32000, available: true, reason: null, group: ['gpu1', 'gpu5'] },
+      { name: 'gpu5', priority: 60, reachable: true, own_jobs: 0, gpu_util_pct: 80, cpu_util_pct: 40, free_mib: 3000, total_mib: 12000, available: false, reason: '他の人が使用中です（9000 MiB）', group: ['gpu1', 'gpu5'] },
     ],
   }),
   getMonitor: async () => ({
