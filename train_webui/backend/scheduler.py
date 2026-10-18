@@ -4,6 +4,8 @@
 - 他の人が使っている台、自分のジョブで満杯の台、つながらない台は使わない。
 - 予約グループ（同じチームが使う台の組）では、自分が新しく台を使い始めた後にも、誰も使っていない台が
   グループ内に1台は残るようにする。つながらない台は、チームも使えないので空きに数えない。
+- 全体の空き（min_free）: 自分が新しく台を使い始めた後にも、誰も使っていない台（自分のジョブも無い台）が
+  全体で min_free 台は残るようにする。GPU が無く使えない台（always_free）は常に空きに数える。つながらない台は数えない。
 - 使える台の中では priority の大きい順（同じなら設定に書いた順）。
 """
 from __future__ import annotations
@@ -27,6 +29,8 @@ class Rule:
     max_parallel_jobs: int
     job_headroom_mib: float
     reserve_groups: tuple[tuple[str, ...], ...] = ()
+    min_free: int = 0                           # 全体で空けておく台数（0 = 無効）
+    always_free: tuple[str, ...] = ()           # GPU が無いなど、使えないが空きとして数える台（registry に無い名前でもよい）
 
 
 def evaluate(states: list[MachineState], rule: Rule) -> dict[str, str | None]:
@@ -54,6 +58,12 @@ def _reason(s: MachineState, by_name: dict[str, MachineState], rule: Rule) -> st
             others = [by_name[n] for n in group if n != s.name and n in by_name]
             if not any(o.reachable and not o.other_active and o.own_jobs == 0 for o in others):
                 return f"同じグループ（{', '.join(group)}）にチーム用の空き台が残らなくなるため使いません"
+    if s.own_jobs == 0 and rule.min_free > 0:  # 新しく台を使い始めるときだけ、全体の空きを確認する
+        free = len(rule.always_free) + sum(
+            1 for o in by_name.values() if o.name != s.name and o.reachable and not o.other_active and o.own_jobs == 0
+        )
+        if free < rule.min_free:
+            return f"全体で{rule.min_free}台は空けておく決まりのため使いません（使うと空きが{free}台になります）"
     return None
 
 

@@ -121,6 +121,8 @@ class InferRequest(BaseModel):
     # その推論ジョブに渡す config だけを書き換える（run に保存された config は変えない）。
     # `section.key=TOMLリテラル` の並び。無いキーは section の中に足す。
     overrides: list[str] = []
+    # 推論を動かす台。省略すると、その run を学習した台が使えればそこ、使えなければ使える別の台に重みを送って動かす
+    machine: str | None = None
 
 
 class ClientRunCreate(BaseModel):
@@ -406,18 +408,47 @@ def create_app(
             return requested
         parent_machine = job_manager.machine_of(parent)
         if requested is not None and requested != parent_machine:
-            # 台を指定されたら、元の run の重みをその台に送る（ubun 間は直接つながらないので、このサーバーを中継する）
             try:
-                src, dst = registry.get(parent_machine), registry.get(requested)
-                try:   # ubun 間の直接の rsync（~/.ssh/config の mesh-<台名>）。つながらなければ、このサーバーを経由する
-                    src.push_checkpoint(parent_id, f"mesh-{requested}", dst.run_root)
-                except Exception:  # noqa: BLE001
-                    dst.write_checkpoint(parent_id, src.read_checkpoint(parent_id))
+                send_checkpoint(parent_id, parent_machine, requested)
             except Exception as e:  # noqa: BLE001 - 中継の失敗は 400 で理由を返す（run は起動しない）
                 raise HTTPException(
                     400, f"引き継ぎ元の run の重みを {parent_machine} から {requested} に送れませんでした: {e}") from e
             return requested
         return parent_machine
+
+    def send_checkpoint(run_id: str, src_name: str, dst_name: str) -> None:
+        """run の重みを src の台から dst の台へ送る（引き継ぎ学習・別の台での推論）。ubun 間の直接の rsync（~/.ssh/config の
+        mesh-<台名>）を先に試し、つながらなければこのサーバーを経由する。"""
+        src, dst = registry.get(src_name), registry.get(dst_name)
+        try:
+            src.push_checkpoint(run_id, f"mesh-{dst_name}", dst.run_root)
+        except Exception:  # noqa: BLE001
+            dst.write_checkpoint(run_id, src.read_checkpoint(run_id))
+
+    def infer_machine(target: dict, requested: str | None) -> str:
+        """推論を動かす台。重みは学習した台にあるので、そこが使えればそこで動かす。使えない（自分の別のジョブ・他の人の使用・
+        空きの決まり）ときは、使える別の台に重みを送って動かす。台を指定されたら、その台（元の台と違えば重みを送る）。"""
+        src = job_manager.machine_of(target)
+        if requested is None or requested == src:
+            try:
+                return choose_machine(src)
+            except HTTPException as e:
+                if requested == src or e.status_code != 409:   # 台を指定されたとき・つながらないとき（重みを読めない）は代わりを探さない
+                    raise
+                src_reason = e.detail
+        else:
+            src_reason = None
+        try:
+            dst = choose_machine(requested)    # requested が None なら、自動選択（元の台は使えないので選ばれない）
+        except HTTPException as e:
+            if src_reason is not None:
+                raise HTTPException(e.status_code, f"{src} は使えず（{src_reason}）、代わりの台もありません: {e.detail}") from e
+            raise
+        try:
+            send_checkpoint(target["run_id"], src, dst)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, f"重みを {src} から {dst} に送れませんでした: {e}") from e
+        return dst
 
     # project の検出はリポジトリ全体を走査して main.py を解析するので重い（数十ms）。frontend は数秒ごとに
     # ツリーを取りに来るため、結果を project_scan_interval_sec だけ使い回す。「再スキャン」は即時に探し直す。
@@ -682,17 +713,20 @@ def create_app(
             raise HTTPException(404, "run が見つかりません")
         if run["status"] == "running":
             raise HTTPException(409, "runningのrunは削除できません")
+        machines_used = {job_manager.machine_of(run)}
         for job in db.list_jobs_for_run(run_id):
             (settings.server.media_dir / "logs" / f"{job['job_id']}.log").unlink(missing_ok=True)
+            machines_used.add(job_manager.machine_of(job))   # 別の台に重みを送って推論した場合、その台にも残っている
         image_dir = settings.server.media_dir / "images" / run_id
         if image_dir.exists():
             shutil.rmtree(image_dir)
         db.delete_run(run_id)
         code_snapshot.delete_ref(settings.repo_root, run_id)
-        try:
-            registry.get(job_manager.machine_of(run)).remove_run_files(run_id)  # 学習用PCの重み・ログ。繋がらなくても run の削除は成功させる
-        except Exception:  # noqa: BLE001
-            pass
+        for name in machines_used:
+            try:
+                registry.get(name).remove_run_files(run_id)  # 学習用PCの重み・ログ。繋がらなくても run の削除は成功させる
+            except Exception:  # noqa: BLE001
+                pass
         return Response(status_code=204)
 
     @app.post("/api/groups/infer")
@@ -720,9 +754,9 @@ def create_app(
                 config_toml = set_value(config_toml, key.strip(), literal.strip(), add_missing=True)
             except TomlValidationError as e:
                 raise HTTPException(400, str(e)) from e
-        await run_in_threadpool(choose_machine, job_manager.machine_of(target))  # 重みはその run を学習した台にある
+        chosen = await run_in_threadpool(infer_machine, target, body.machine)
         try:
-            job = await run_in_threadpool(job_manager.start_infer, target["run_id"], body.project, config_toml)
+            job = await run_in_threadpool(job_manager.start_infer, target["run_id"], body.project, config_toml, chosen)
         except JobBusyError as e:
             raise HTTPException(409, str(e)) from e
         return _job_public(job)

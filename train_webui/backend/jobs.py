@@ -177,15 +177,16 @@ class JobManager:
             self._export_code(commit, Path(tmp))
             remote.sync_code(Path(tmp))
 
-    def start_infer(self, run_id: str, project: str, config_toml: str | None = None) -> dict:
+    def start_infer(self, run_id: str, project: str, config_toml: str | None = None, machine: str | None = None) -> dict:
         """groupの[infer]ボタン。対象runは変えず、jobだけ作って起動する。
-        config_toml を渡すとそのjobだけその config で動かす（ctl infer --set の上書き）。"""
+        config_toml を渡すとそのjobだけその config で動かす（ctl infer --set の上書き）。
+        machine はジョブを動かす台（None ならその run を学習した台。別の台なら、呼び出し側が先に重みを送っておく）。"""
         run = self._db.get_run(run_id)
         if run is None:
             raise ValueError("run が見つかりません")
         if config_toml is not None:
             run = {**run, "config_toml": config_toml}
-        machine = self.machine_of(run)  # 重みはその run を学習した台にある
+        machine = machine or self.machine_of(run)
         job_id = self._reserve_job(run_id, kind="infer", machine=machine)
         self._spawn(self._launch_infer, run_id, job_id, run, project, machine)
         job = self._db.get_job(job_id)

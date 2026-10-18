@@ -38,7 +38,8 @@ class MachineManager:
     def rule(self) -> Rule:
         s = self._settings
         return Rule(max_parallel_jobs=s.max_parallel_jobs, job_headroom_mib=s.job_headroom_mib,
-                    reserve_groups=s.scheduler.reserve_groups)
+                    reserve_groups=s.scheduler.reserve_groups, min_free=s.scheduler.min_free,
+                    always_free=s.scheduler.always_free)
 
     def _probe(self, name: str, fresh: bool) -> GpuUsage | None:
         failed = self._failed_at.get(name)
@@ -87,9 +88,13 @@ class MachineManager:
         states = [s for s, _ in pairs]
         reasons = evaluate(states, self.rule)
         groups = self._settings.scheduler.reserve_groups
+        sc = self._settings.scheduler
+        free_now = len(sc.always_free) + sum(1 for s in states if s.reachable and not s.other_active and s.own_jobs == 0)
         return {
             "default": self._registry.default_name,
             "selected": pick(states, reasons),
+            # 全体で空ける決まり（min_free）に対する余裕: 今の空き台数 - min_free（新しく使い始められる台数の上限）。無効なら None
+            "min_free": sc.min_free, "min_free_slack": (free_now - sc.min_free) if sc.min_free > 0 else None,
             "machines": [{
                 "name": s.name, "priority": s.priority, "reachable": s.reachable, "own_jobs": s.own_jobs,
                 "other_mib": s.other_mib, "other_active": s.other_active,

@@ -18,7 +18,9 @@ stop_timeout_sec = 10                                 # SIGTERM後、SIGKILLま�
 
 # 複数台のときの自動選択のルール（design.md §1.7）。1台なら不要
 # [scheduler]
-# reserve_groups = [["gpu1", "gpu5"], ["gpu2", "gpu4"]]   # 同じチームが使う台。グループ内に誰も使っていない台を1台残す
+# min_free = 2                                                # 自分が新しく台を使い始めた後も、誰も使っていない台を全体でこの台数だけ残す（0 = 無効）
+# always_free = ["gpu3"]                                     # GPU が無く使えない台。常に空きとして数える（[remote] に登録しなくてよい）
+# reserve_groups = [["gpu1", "gpu5"], ["gpu2", "gpu4"]]   # （任意）同じチームが使う台。グループ内に誰も使っていない台を1台残す
 # unreachable_retry_sec = 30                                 # 画面の更新では、つながらなかった台をこの秒数は測り直さない
 # other_grace_sec = 300                                       # 他の人の使用が見えなくなってから、使用中とみなし続ける秒数
 
