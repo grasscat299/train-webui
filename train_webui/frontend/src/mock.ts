@@ -855,6 +855,18 @@ export const mockApi: Api = {
     gpus: [{ index: 0, name: 'NVIDIA GeForce GTX 1080', util: Math.round(Math.random() * 100), mem_used_mib: 5000,
              mem_total_mib: 8192, temp_c: 70, power_w: 150 }],
   }),
+  getLabNow: async () => ['gpu1', 'gpu2', 'gpu3'].map((n, i) => ({
+    name: n, title: `ubuntu${i + 1}`, label: 'RTX 5090 32GB', ts: Date.now() / 1000,
+    cpu: 8 + i * 10, gpu_util: i === 2 ? 0 : 90, vram_used: i === 2 ? 40 : 11000, vram_total: 32607, temp: 50 + i * 10,
+    cpu_temp: 40 + i * 20, load: 2, ram_used: 6000, ram_total: 31864, in_use: i === 2 ? 0 : 1,
+  })),
+  getLabHistory: async (_m, hours) => {
+    const now = Math.floor(Date.now() / 1000), step = Math.max(60, Math.floor((hours * 3600) / 60));
+    return Array.from({ length: 60 }, (_, k) => ({
+      ts: now - (59 - k) * step, ok: 1, gpu_util: 60 + 30 * Math.sin(k / 6), vram_used: 11000, vram_total: 32607, temp: 55 + 5 * Math.sin(k / 9),
+      cpu: 10 + 5 * Math.sin(k / 4), cpu_temp: 70 + 10 * Math.sin(k / 8), load: 2, ram_used: 6000, ram_total: 31864, in_use: 1,
+    }));
+  },
   getPlots,
   getBinnedPlot,
   putView: async () => {},

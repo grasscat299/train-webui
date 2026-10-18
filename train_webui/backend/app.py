@@ -10,6 +10,9 @@ import re
 import shutil
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -469,6 +472,28 @@ def create_app(
             return await run_in_threadpool(registry.get(name).monitor)
         except RemoteError as e:
             raise HTTPException(502, f"学習用PCの使用状況を取得できません: {e}") from e
+
+    def _lab_get(path: str, params: dict) -> object:
+        """gpu5 の lab_monitor server に問い合わせ、返ってきた JSON をそのまま返す（形は lab_monitor の API と同じ）。"""
+        base = settings.monitor.url
+        if not base:
+            raise HTTPException(503, "Monitor の取得先が未設定です（server.toml の [monitor] url）")
+        url = f"{base}{path}?{urllib.parse.urlencode(params)}"
+        try:
+            with urllib.request.urlopen(url, timeout=settings.monitor.timeout_sec) as r:
+                return json.loads(r.read())
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            raise HTTPException(502, f"lab_monitor（{base}）に問い合わせられません: {e}") from e
+
+    @app.get("/api/lab/now")
+    async def get_lab_now() -> object:
+        """全台の現在の使用状況（lab_monitor の /api/now と同じ形）。"""
+        return await run_in_threadpool(_lab_get, "/api/now", {})
+
+    @app.get("/api/lab/history")
+    async def get_lab_history(machine: str, hours: float = 1) -> object:
+        """1 台の履歴（lab_monitor の /api/history と同じ形）。"""
+        return await run_in_threadpool(_lab_get, "/api/history", {"machine": machine, "hours": hours})
 
     @app.post("/api/runs/draft")
     def create_draft(body: DraftRequest) -> dict:

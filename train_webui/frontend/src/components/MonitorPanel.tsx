@@ -1,141 +1,159 @@
 import { useEffect, useRef, useState } from 'react';
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../api';
-import type { MachineInfo, MachinesResp, MonitorResp } from '../api';
+import type { LabHistoryRow, LabNow } from '../api';
 import { usePolling } from '../hooks/usePolling';
 
-const INTERVAL_MS = 2000;
-const HISTORY = 150; // グラフに残す点数（2秒ごと = 約5分）
+// Monitor タブ。gpu5 の lab_monitor server（GET /api/lab/now, /api/lab/history）の値を、lab_monitor の画面と同じ見た目で出す。
+// 色・グラフの描き方は lab_monitor/static/index.html と同じ（色は styles.css の .labmon で明暗とも定義）。
+const NOW_INTERVAL_MS = 5000;
+const HISTORY_INTERVAL_MS = 60000;
+const RANGES = [{ h: 1, label: '1時間' }, { h: 6, label: '6時間' }, { h: 24, label: '24時間' }, { h: 168, label: '7日' }];
 
-interface GpuPoint { t: number; util: number | null; mem: number | null; temp: number | null }
+const pct = (v: number, t: number) => (t ? Math.min(100, (100 * v) / t) : 0);
+const fmtG = (mib: number) => `${(mib / 1024).toFixed(1)} GB`;
 
-// 使用率(%)を横棒で出す。高いほど色を変える
-function Bar({ value, label, detail }: { value: number | null; label: string; detail?: string }) {
-  const v = value ?? 0;
-  const level = v >= 90 ? 'high' : v >= 60 ? 'mid' : 'low';
+type Series = [(r: LabHistoryRow) => number | null | undefined, string][];
+
+// 0〜100 の縦軸（% と ℃ 共通）と時刻の横軸つきの折れ線。取得に失敗した点（ok=0）の所は線を切る
+function drawChart(cv: HTMLCanvasElement, rows: LabHistoryRow[], hours: number, series: Series) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr;
+  cv.height = H * dpr;
+  const x = cv.getContext('2d');
+  if (!x) return;
+  x.scale(dpr, dpr);
+  const st = getComputedStyle(cv);
+  const css = (n: string) => st.getPropertyValue(n).trim();
+  const mut = css('--lm-mut'), grid = css('--lm-grid');
+  const L = 34, R = 8, T = 6, B = 18, pw = W - L - R, ph = H - T - B;
+  const Y = (v: number) => T + ph * (1 - Math.min(100, Math.max(0, v)) / 100);
+  const t1 = Date.now() / 1000, t0 = t1 - hours * 3600;
+  const X = (t: number) => L + ((t - t0) / (t1 - t0)) * pw;
+  x.font = '11px system-ui,sans-serif';
+  x.lineWidth = 1;
+  x.textAlign = 'right';
+  x.textBaseline = 'middle';
+  for (const v of [0, 25, 50, 75, 100]) {
+    x.strokeStyle = grid;
+    x.beginPath(); x.moveTo(L, Y(v)); x.lineTo(W - R, Y(v)); x.stroke();
+    if (v % 50 === 0) { x.fillStyle = mut; x.fillText(String(v), L - 5, Y(v)); }
+  }
+  // 横軸は範囲ごとに間隔を変え、ローカル時刻のキリのよい所に目盛りを置く
+  const step = hours <= 1 ? 600 : hours <= 6 ? 3600 : hours <= 24 ? 4 * 3600 : 86400;
+  const off = new Date().getTimezoneOffset() * 60;
+  x.textAlign = 'center';
+  x.textBaseline = 'top';
+  let lastX = -1e9;
+  for (let t = Math.ceil((t0 - off) / step) * step + off; t <= t1; t += step) {
+    const px = X(t);
+    x.strokeStyle = grid;
+    x.beginPath(); x.moveTo(px, T); x.lineTo(px, T + ph); x.stroke();
+    const d = new Date(t * 1000);
+    const lab = step >= 86400 ? `${d.getMonth() + 1}/${d.getDate()}` : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    if (px - lastX > 38 && px < W - R - 10) { x.fillStyle = mut; x.fillText(lab, px, T + ph + 4); lastX = px; }
+  }
+  if (!rows.length) return;
+  x.save();
+  x.beginPath(); x.rect(L, T - 2, pw, ph + 4); x.clip();
+  for (const [f, c] of series) {
+    x.strokeStyle = css(c);
+    x.lineWidth = 2;
+    x.lineJoin = 'round';
+    x.beginPath();
+    let pen = false;
+    for (const r of rows) {
+      const v = f(r);
+      if (!r.ok || v == null) { pen = false; continue; }
+      if (pen) x.lineTo(X(r.ts), Y(v)); else x.moveTo(X(r.ts), Y(v));
+      pen = true;
+    }
+    x.stroke();
+  }
+  x.restore();
+}
+
+function Chart({ rows, hours, series }: { rows: LabHistoryRow[]; hours: number; series: Series }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => { if (ref.current) drawChart(ref.current, rows, hours, series); });
+  return <canvas ref={ref} className="lm-canvas" />;
+}
+
+function Legend({ items, right }: { items: [string, string][]; right: string }) {
   return (
-    <div className="mon-row">
-      <span className="mon-label">{label}</span>
-      <div className="mon-track">
-        <div className={`mon-fill ${level}`} style={{ width: `${Math.min(100, v)}%` }} />
-      </div>
-      <span className="mon-value">{value === null ? 'N/A' : `${v.toFixed(0)}%`}</span>
-      {detail && <span className="mon-detail">{detail}</span>}
+    <div className="lm-row">
+      <span>
+        {items.map(([name, color]) => (
+          <span key={name} className="lm-lg"><i className="lm-k" style={{ background: `var(${color})` }} />{name}</span>
+        ))}
+      </span>
+      <span>{right}　縦軸 % / ℃</span>
     </div>
   );
 }
 
-// GPU ごとに、使用率・メモリ(%)・温度の推移を折れ線で出す（温度は右軸）。数値は現在値
-function GpuChart({ points }: { points: GpuPoint[] }) {
-  return (
-    <div className="mon-chart">
-      <ResponsiveContainer width="100%" height={180}>
-        <LineChart data={points} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-          <XAxis dataKey="t" tickFormatter={(t: number) => `${Math.round(t - points[points.length - 1].t)}s`} fontSize={11} />
-          <YAxis yAxisId="pct" domain={[0, 100]} unit="%" width={44} fontSize={11} />
-          <YAxis yAxisId="temp" orientation="right" domain={[20, 100]} unit="℃" width={48} fontSize={11} />
-          <Tooltip labelFormatter={(t) => `${Math.round(Number(t) - points[points.length - 1].t)} 秒`} formatter={(v) => (v == null ? 'N/A' : Number(v).toFixed(0))} />
-          <Legend />
-          <Line yAxisId="pct" dataKey="util" name="使用率(%)" stroke="#4c8dff" dot={false} isAnimationActive={false} />
-          <Line yAxisId="pct" dataKey="mem" name="メモリ(%)" stroke="#8e6bd8" dot={false} isAnimationActive={false} />
-          <Line yAxisId="temp" dataKey="temp" name="温度(℃)" stroke="#d9534f" dot={false} isAnimationActive={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function Gpus({ data, history }: { data: MonitorResp; history: Record<number, GpuPoint[]> }) {
-  if (data.gpus.length === 0) return <p className="mon-note">GPU が見つかりません（nvidia-smi が使えません）。</p>;
+function Bar({ label, value, text, width }: { label: string; value?: string; text: string; width: number }) {
   return (
     <>
-      {data.gpus.map((g) => {
-        const extra = [
-          g.util !== null ? `使用率 ${g.util.toFixed(0)}%` : null,
-          g.mem_used_mib !== null && g.mem_total_mib !== null ? `メモリ ${g.mem_used_mib.toFixed(0)} / ${g.mem_total_mib.toFixed(0)} MiB` : null,
-          g.temp_c !== null ? `${g.temp_c.toFixed(0)}℃` : null,
-          g.power_w !== null ? `${g.power_w.toFixed(0)}W` : null,
-        ].filter(Boolean).join(' / ');
-        return (
-          <div key={g.index} className="mon-gpu">
-            <div className="mon-gpu-name">GPU {g.index}: {g.name}{extra && `（${extra}）`}</div>
-            {(history[g.index]?.length ?? 0) > 1 && <GpuChart points={history[g.index]} />}
-          </div>
-        );
-      })}
+      <div className="lm-row"><span>{label}</span><b>{value ?? text}</b></div>
+      <div className="lm-bar"><i style={{ width: `${width}%` }} /></div>
     </>
   );
 }
 
-// 全台の一覧（GET /api/machines。サーバー側で数秒キャッシュされ、不通の台は何度も測り直さない）。行を押すとその台の詳細を下に出す
-function Overview({ data, selected, onSelect }: { data: MachinesResp; selected: string; onSelect: (name: string) => void }) {
-  const mem = (m: MachineInfo) => {
-    if (!m.reachable || m.total_mib === null || m.free_mib === null) return '-';
-    return `${m.total_mib - m.free_mib} / ${m.total_mib} MiB`;
-  };
+function Card({ m, hours, rows }: { m: LabNow; hours: number; rows: LabHistoryRow[] }) {
+  const off = m.error !== undefined;
+  const noGpu = !off && m.gpu_util == null;
+  const badge = off ? ['off', '接続不可'] : noGpu ? ['off', 'GPU不明'] : m.in_use ? ['busy', '使用中'] : ['free', '空き'];
+  const cpu = m.cpu ?? 0;
   return (
-    <table className="mon-overview">
-      <thead>
-        <tr><th>台</th><th>GPU メモリ</th><th>他の人</th><th>自分のジョブ</th><th>起動</th></tr>
-      </thead>
-      <tbody>
-        {data.machines.map((m) => (
-          <tr key={m.name} className={m.name === selected ? 'selected' : ''} onClick={() => onSelect(m.name)} style={{ cursor: 'pointer' }}>
-            <td>{m.name}{m.name === data.selected && <span title="いま自動選択される台"> ★</span>}</td>
-            <td>{mem(m)}</td>
-            <td>{m.reachable ? `${m.other_mib} MiB` : '接続不可'}</td>
-            <td>{m.own_jobs}</td>
-            <td title={m.reason ?? undefined}>{m.available ? '可' : `不可（${m.reason ?? ''}）`}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="lm-card">
+      <div className="lm-top">
+        <div><span className="lm-name">{m.title || m.name}</span> <span className="lm-lab">{m.label}</span></div>
+        <span className={`lm-badge ${badge[0]}`}>{badge[1]}</span>
+      </div>
+      {off ? (
+        <p className="lm-err">{m.error}</p>
+      ) : (
+        <>
+          <Bar label="GPU" text={noGpu ? '取得できません' : `${(m.gpu_util ?? 0).toFixed(0)} %`} width={noGpu ? 0 : (m.gpu_util ?? 0)} />
+          <Bar label="VRAM" text={noGpu ? '—' : `${fmtG(m.vram_used ?? 0)} / ${fmtG(m.vram_total ?? 0)}`} width={noGpu ? 0 : pct(m.vram_used ?? 0, m.vram_total ?? 0)} />
+          <Bar label="CPU/(RAM)" text={`${cpu.toFixed(0)} % / (${fmtG(m.ram_used ?? 0)} / ${fmtG(m.ram_total ?? 0)})`} width={cpu} />
+        </>
+      )}
+      <Chart rows={rows} hours={hours} series={[[(r) => r.gpu_util, '--lm-s1'], [(r) => (r.vram_total ? pct(r.vram_used ?? 0, r.vram_total) : null), '--lm-s3'], [(r) => r.temp, '--lm-s2']]} />
+      <Legend items={[['GPU使用率', '--lm-s1'], ['VRAM', '--lm-s3'], ['GPU温度', '--lm-s2']]} right={m.temp != null ? `GPU ${m.temp.toFixed(0)} ℃` : ''} />
+      <Chart rows={rows} hours={hours} series={[[(r) => r.cpu, '--lm-s1'], [(r) => r.cpu_temp, '--lm-s2']]} />
+      <Legend items={[['CPU使用率', '--lm-s1'], ['CPU温度', '--lm-s2']]} right={m.cpu_temp != null ? `CPU ${m.cpu_temp.toFixed(0)} ℃` : ''} />
+    </div>
   );
 }
 
-// 学習用PCの GPU・CPU（コアごと）の使用率。このパネルを開いている間だけ取りに行く（別のタブに切り替えれば止まる。
-// タブが裏にある間も止まる）。一覧は5秒ごと、選んだ台の詳細は2秒ごと。開いていない間は何も測らない
 export function MonitorPanel() {
-  const [machine, setMachine] = useState('');  // '' = 既定の台
-  const { data: machines } = usePolling(() => api.getMachines(), 5000, []);
-  const current = machine || machines?.default || '';
-  const { data, error } = usePolling(() => api.getMonitor(current || null), INTERVAL_MS, [current]);
-  // GPU の推移。台を切り替えたら捨てる（取得のたびに1点足す）
-  const [history, setHistory] = useState<Record<number, GpuPoint[]>>({});
-  const startRef = useRef(Date.now());
-  useEffect(() => setHistory({}), [current]);
-  useEffect(() => {
-    if (!data) return;
-    const t = (Date.now() - startRef.current) / 1000;
-    setHistory((h) => {
-      const next = { ...h };
-      for (const g of data.gpus) {
-        const mem = g.mem_used_mib !== null && g.mem_total_mib ? (100 * g.mem_used_mib) / g.mem_total_mib : null;
-        next[g.index] = [...(h[g.index] ?? []), { t, util: g.util, mem, temp: g.temp_c }].slice(-HISTORY);
-      }
-      return next;
-    });
-  }, [data]);
+  const [hours, setHours] = useState(1);
+  const { data, error } = usePolling(() => api.getLabNow(), NOW_INTERVAL_MS, []);
+  const [hist, setHist] = useState<Record<string, LabHistoryRow[]>>({});
+  const names = (data ?? []).map((m) => m.name).join(',');
+  // 履歴は台ごとに、範囲を変えた時と 1 分ごとに取り直す
+  const { data: histData } = usePolling(
+    async () => Object.fromEntries(await Promise.all(names.split(',').filter(Boolean).map(async (n) => [n, await api.getLabHistory(n, hours)] as const))),
+    HISTORY_INTERVAL_MS,
+    [names, hours],
+  );
+  useEffect(() => { if (histData) setHist(histData); }, [histData]);
   return (
-    <div className="mon-panel">
-      <h2>学習用PCの使用状況</h2>
-      {machines && machines.machines.length > 1 && <Overview data={machines} selected={current} onSelect={setMachine} />}
-      <h3>{current} の詳細</h3>
+    <div className="mon-panel labmon">
+      <div className="lm-head">
+        <h2>学習用 PC の使用状況</h2>
+        <label className="lm-sub">履歴 <select value={hours} onChange={(e) => setHours(Number(e.target.value))}>
+          {RANGES.map((r) => <option key={r.h} value={r.h}>{r.label}</option>)}
+        </select></label>
+      </div>
       {error && <div className="error-banner">{error}</div>}
       {!data && !error && <p className="mon-note">取得中…</p>}
-      {data && (
-        <>
-          <h3>GPU</h3>
-          <Gpus data={data} history={history} />
-          <h3>CPU（コアごと）{data.cpu_total !== null && `　全体 ${data.cpu_total.toFixed(0)}%`}{data.cpu_temp_c != null && `　温度 ${data.cpu_temp_c.toFixed(0)}℃`}</h3>
-          <div className="mon-cores">
-            {data.cpu_cores.map((c, i) => (
-              <Bar key={i} value={c} label={`${i}`} />
-            ))}
-          </div>
-        </>
-      )}
+      <div className="lm-grid">
+        {(data ?? []).map((m) => <Card key={m.name} m={m} hours={hours} rows={hist[m.name] ?? []} />)}
+      </div>
     </div>
   );
 }

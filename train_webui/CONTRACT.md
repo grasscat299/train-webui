@@ -91,7 +91,9 @@ train_webui/
 | `POST /api/rescan` | project検出をやり直す。`GET /api/tree` と同じ形を返す |
 | `GET /api/machines?fresh=` | 学習用PC（複数台）の状態。`{"default", "selected": 自動選択される台 \| null, "machines": [{name, priority, reachable, own_jobs, other_mib, free_mib, total_mib, available, reason, group}]}`。`available=false` のとき `reason` に使えない理由（design.md §1.7） |
 | `POST /api/runs/{id}/start?machine=` | `machine` 省略で自動選択。指定しても §1.7 のルールは適用される（409/502）。引き継ぎ学習は元の run の台に固定（違う台の指定は 400） |
-| `GET /api/monitor?machine=` | 台の指定（省略時は既定の台） |
+| `GET /api/monitor?machine=` | 台の指定（省略時は既定の台）。ssh で直接測る旧方式。Monitor タブは今は使わない |
+| `GET /api/lab/now` | Monitor タブ用。gpu5 の lab_monitor server（server.toml の `[monitor] url`）の `/api/now` をそのまま中継する。`[{name, title, label, ts, error?, cpu, gpu_util, vram_used, vram_total, temp, cpu_temp, load, ram_used, ram_total, in_use}]`。取得先が未設定は 503、つながらなければ 502 |
+| `GET /api/lab/history?machine=&hours=` | 同じく `/api/history` の中継。`[{ts, ok, gpu_util, vram_used, vram_total, temp, cpu, cpu_temp, load, ram_used, ram_total, in_use}]`（`ok=0` は取得失敗の欠損） |
 | `GET /api/state` | `{"busy": bool, "active": {"run_id", "job_id" \| null, "kind", "origin"} \| null}`。GPU使用中か（webuiのjobが running、または cli の run が running） |
 | `POST /api/runs/draft` | body `{"project": str, "group": str \| null, "new_group": bool, "group_name": str \| null}`。§3（design.md）の規則で初期configを決めて draft を作る。既存groupへの追加では `group`（group_id）必須。`new_group=true` で `group` 省略なら group_id（`g<YYYYMMDD_HHMMSS>`）と group_name（`group_name` 省略時 `group1`, `group2`, ...）を自動で振り、`[wandb].group` を group_id に書き換える。返り値 Run |
 | `PUT /api/groups` | body `{"project": str, "group": str, "group_name": str}`。group の表示名だけを変える（group_id・config は変えない）。空なら400、group が無ければ404。返り値 `{"project", "group", "group_name"}` |

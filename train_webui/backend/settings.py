@@ -49,6 +49,13 @@ class ServerSettings:
 
 
 @dataclass(frozen=True)
+class MonitorSettings:
+    """Monitor タブの取得先（gpu5 の lab_monitor server。lab_monitor/README.md）。空なら使えない。"""
+    url: str = ""
+    timeout_sec: float = 8.0
+
+
+@dataclass(frozen=True)
 class Settings:
     remote: RemoteSettings  # 既定のマシン。1台構成の呼び出し側（check_remote・既存テスト）はこれを読む
     server: ServerSettings
@@ -68,6 +75,7 @@ class Settings:
     machines: dict[str, RemoteSettings] = field(default_factory=dict)
     default_machine: str = "default"
     scheduler: SchedulerSettings = field(default_factory=SchedulerSettings)
+    monitor: MonitorSettings = field(default_factory=MonitorSettings)
 
     def __post_init__(self) -> None:
         if not self.machines:  # remote だけ渡された場合（テスト等）は、それを唯一のマシンとして扱う
@@ -128,6 +136,8 @@ def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
         max_parallel_jobs=int(raw.get("gpu", {}).get("max_parallel_jobs", 1)),
         job_headroom_mib=float(raw.get("gpu", {}).get("job_headroom_mib", 4096)),
         scheduler=_parse_scheduler(raw.get("scheduler", {}), machines),
+        monitor=MonitorSettings(url=str(raw.get("monitor", {}).get("url", "")).rstrip("/"),
+                                timeout_sec=float(raw.get("monitor", {}).get("timeout_sec", 8))),
         project_scan_interval_sec=float(raw.get("log", {}).get("project_scan_interval_sec", 30)),
     )
 
