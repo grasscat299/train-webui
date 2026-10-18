@@ -214,3 +214,58 @@ def test_lab_monitor_proxy(tmp_path):
         assert make("http://127.0.0.1:1").get("/api/lab/now").status_code == 502
     finally:
         srv.shutdown()
+
+
+def _finished_on(client, app, fakes, machine):
+    run = _draft(client)
+    client.post(f"/api/runs/{run['run_id']}/start", params={"machine": machine})
+    fakes[machine].set_finished(next(iter(fakes[machine].poll_results)), 0)
+    app.state.job_manager.poll_once()
+    app.state.db.upsert_artifact(run["run_id"], "w.pt", "checkpoint", "p", 1, "t")
+    return run
+
+
+def test_infer_falls_back_to_another_machine_and_sends_weights(tmp_path):
+    app, client, fakes = _setup(tmp_path, groups=())
+    run = _finished_on(client, app, fakes, "b1")
+    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)     # 重みのある b1 を他の人が使い始めた
+    resp = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]})
+    assert resp.status_code == 200 and resp.json()["machine"] == "a1"             # 使える台（優先度の高い a1）で動く
+    assert fakes["b1"].direct_pushes == [(run["run_id"], "mesh-a1", "/remote/run_root")]   # b1 から a1 へ重みを直接送った
+    assert fakes["a1"].launches[-1].kind == "infer" and fakes["a1"].launches[-1].run_id == run["run_id"]
+    assert client.get(f"/api/runs/{run['run_id']}").json()["status"] == "finished"      # run の台・状態は変わらない
+    # run を消すと、重みを送った台のファイルも消す
+    app.state.job_manager.poll_once()
+    fakes["a1"].set_finished(next(iter(fakes["a1"].poll_results)), 0)
+    app.state.job_manager.poll_once()
+    assert client.delete(f"/api/runs/{run['run_id']}").status_code == 204
+    assert run["run_id"] in fakes["a1"].removed_runs and run["run_id"] in fakes["b1"].removed_runs
+
+
+def test_infer_fallback_relays_through_server_when_direct_fails_and_reports_failures(tmp_path):
+    app, client, fakes = _setup(tmp_path, groups=())
+    run = _finished_on(client, app, fakes, "b1")
+    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+    fakes["b1"].checkpoints[run["run_id"]] = b"TAR"
+    fakes["b1"].fail_direct = True
+    ok = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"], "machine": "a2"})
+    assert ok.status_code == 200 and ok.json()["machine"] == "a2" and fakes["a2"].checkpoints[run["run_id"]] == b"TAR"
+    fakes["b1"].fail_checkpoint = True
+    app.state.job_manager.poll_once()
+    fakes["a2"].set_finished(next(iter(fakes["a2"].poll_results)), 0)
+    app.state.job_manager.poll_once()
+    bad = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]})
+    assert bad.status_code == 400 and "送れませんでした" in bad.json()["detail"]
+
+
+def test_infer_does_not_fall_back_when_source_unreachable_or_machine_given_and_nothing_free(tmp_path):
+    app, client, fakes = _setup(tmp_path, groups=())
+    run = _finished_on(client, app, fakes, "b1")
+    fakes["b1"].fail_gpu = True                                        # 重みを読めない
+    assert client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]}).status_code == 502
+    fakes["b1"].fail_gpu = False
+    for n in ("a1", "a2", "b2"):
+        fakes[n].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+    fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, total_mib=BIG)
+    r = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]})
+    assert r.status_code == 409 and "代わりの台もありません" in r.json()["detail"]

@@ -42,3 +42,12 @@ def test_registry_builds_controller_per_machine_with_its_remote():
     assert reg.get("b") == "hb"
     with pytest.raises(KeyError):
         reg.get("zzz")
+
+
+def test_scheduler_min_free_and_always_free_are_parsed():
+    from train_webui.backend.settings import _parse_scheduler
+    machines, _ = parse_machines({"defaults": {**_COMMON, **_PATHS}, "a": {"host": "a"}})
+    sc = _parse_scheduler({"min_free": 2, "always_free": ["gpu3"]}, machines)
+    assert sc.min_free == 2 and sc.always_free == ("gpu3",) and sc.reserve_groups == ()
+    sc0 = _parse_scheduler({}, machines)
+    assert sc0.min_free == 0 and sc0.always_free == ()

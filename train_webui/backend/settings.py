@@ -30,6 +30,9 @@ class SchedulerSettings:
     """学習用PCの自動選択のルール（machines.py / scheduler.py）。"""
     # 同じチームが使う台のグループ。他の人が使っていてグループ内に空き（誰も使っていない台）が残らなくなる台は、自分では使わない
     reserve_groups: tuple[tuple[str, ...], ...] = ()
+    # 自分が新しく台を使い始めた後も、誰も使っていない台を全体でこの台数だけ残す（0 = 無効）。always_free は GPU が無く使えない台で、常に空きに数える
+    min_free: int = 0
+    always_free: tuple[str, ...] = ()
     # 他の人の使用が見えなくなってからも、これだけの秒数は使用中とみなす（学習の合間にメモリが空く瞬間があるため）
     other_grace_sec: float = 300.0
     # GET /api/machines の結果を使い回す秒数（起動の判定は毎回測り直す）
@@ -110,6 +113,8 @@ def _parse_scheduler(raw: dict, machines: dict[str, RemoteSettings]) -> Schedule
                 raise ValueError(f"[scheduler] reserve_groups に未登録のマシン {name!r} があります（登録済み: {', '.join(machines)}）")
     return SchedulerSettings(
         reserve_groups=groups,
+        min_free=int(raw.get("min_free", 0)),
+        always_free=tuple(str(n) for n in raw.get("always_free", [])),
         other_grace_sec=float(raw.get("other_grace_sec", 300)),
         probe_ttl_sec=float(raw.get("probe_ttl_sec", 5)),
         unreachable_retry_sec=float(raw.get("unreachable_retry_sec", 30)),

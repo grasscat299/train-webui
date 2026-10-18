@@ -9,7 +9,7 @@ server が起動している必要がある。リポジトリ直下から実行�
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
     venv/bin/python -m train_webui.ctl machines
     venv/bin/python -m train_webui.ctl start <run_id> [--machine NAME]
-    venv/bin/python -m train_webui.ctl infer <project> [<group> | --run RUN_ID] [--set section.key=<TOMLリテラル> ...]
+    venv/bin/python -m train_webui.ctl infer <project> [<group> | --run RUN_ID] [--machine NAME] [--set section.key=<TOMLリテラル> ...]
     venv/bin/python -m train_webui.ctl stop <run_id> [--graceful]
 
 - `describe` は group（=モデル構成）の説明（Markdown）を上書きする。group は group_id でも表示名でもよい。
@@ -20,8 +20,10 @@ server が起動している必要がある。リポジトリ直下から実行�
 - `infer --set` はその推論ジョブに渡す config だけを書き換える（run に保存された config は変えない）。
   無いキーは section の中に足す（例: `--set 'infer.mode="eval"' --set infer.eval_n=200`）。
 - `machines` は学習用PC（複数台）ごとの使用状況・今起動してよいか（だめな理由つき）・自動選択される台を出す。
-- `start` は台を自動で選ぶ（他の人が使っていない台・チームの枠を残すルール・5090 優先）。`--machine NAME` で指定もできるが、
-  ルールは同じく適用され、使えない台は断られる。引き継ぎ学習は元の run の台、`infer` は run を学習した台に固定される。
+- `start` は台を自動で選ぶ（他の人が使っていない台・空きを残すルール・5090 優先）。`--machine NAME` で指定もできるが、
+  ルールは同じく適用され、使えない台は断られる。引き継ぎ学習は元の run の台に固定される。
+- `infer` は、その run を学習した台が使えればそこで動かす。使えない（自分の別のジョブ・他の人の使用・空きの決まり）ときは、
+  使える別の台に重みを自動で送って動かす。`--machine NAME` で台を指定でもできる（元の台と違えば重みを送る）。
 - `start` / `infer` は GPU が使用中なら server が断る。
 """
 from __future__ import annotations
@@ -145,7 +147,8 @@ def cmd_infer(api: Api, args: argparse.Namespace) -> None:
     if not args.group and not args.run:
         raise CtlError("group か --run のどちらかを指定してください")
     job = api.call("POST", "/api/groups/infer",
-                   {"project": args.project, "group": args.group, "run_id": args.run, "overrides": args.overrides})
+                   {"project": args.project, "group": args.group, "run_id": args.run, "overrides": args.overrides,
+                    "machine": args.machine})
     print(json.dumps(job, ensure_ascii=False, indent=2))
 
 
@@ -201,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--run", metavar="RUN_ID", help="この run の重みで推論する（重みが登録された、学習の終わった run だけ）")
     s.add_argument("--set", dest="overrides", action="append", default=[], metavar="section.key=値",
                    help="この推論だけ config を上書き（run の config は変えない。無いキーは section に足す）")
+    s.add_argument("--machine", help="推論を動かす台（省略時は、その run を学習した台。使えなければ使える別の台に重みを送って動かす）")
     s.set_defaults(func=cmd_infer)
 
     args = p.parse_args(argv)

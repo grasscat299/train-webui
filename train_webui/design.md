@@ -103,10 +103,11 @@ WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマ�
 ## 1.7 学習用PCが複数台あるとき
 `server.toml` の `[remote.defaults]`（共通値）と `[remote.<名前>]`（台ごと。`host` と `priority` など）で登録する。最初に書いた台が既定のマシン（`machine` 列が NULL の古い run はここで動いたものとして扱う）。`[remote]` に `host` を直に書く旧形式も、`default` という1台として読める。
 
-- **台の記録**: `runs.machine` / `jobs.machine`。stop・ログ取得・生存確認・run の削除・推論は、その run を動かした台に対して行う（重みはその台の `run_root` にあるため、推論と引き継ぎ学習は台を選べない）。
+- **台の記録**: `runs.machine` / `jobs.machine`。stop・ログ取得・生存確認は、その run・job を動かした台に対して行う。重みは学習した台の `run_root` にある。引き継ぎ学習は元の run の台で動かす（別の台を指定すると重みを送る）。**推論は、学習した台が使えればそこで、使えない（自分の別のジョブ・他の人の使用・空きの決まり）ときは使える別の台に重みを送って動かす**（`POST /api/groups/infer` の `machine` で台の指定もできる。まず ubun 間の直接 rsync、だめならサーバー経由）。学習した台がつながらないときは重みを読めないので動かさない。run を消すと、重みを送った台のファイルも消す。
 - **自動選択**（`scheduler.py` が規則、`machines.py` が測定。起動のたびに全台の GPU を測り直す）。共用の台なので、次を満たす台だけを候補にする。
   - つながる。他の人が使っていない（自分たち以外の GPU メモリ > `gpu.busy_threshold_mib`。見えなくなってから `scheduler.other_grace_sec` 秒は使用中とみなす）。自分のジョブで満杯でない（`gpu.max_parallel_jobs`）。
   - 予約グループ（`scheduler.reserve_groups`。例 `[["gpu1","gpu5"],["gpu2","gpu4"]]`）では、自分が新しく台を使い始めた後も、誰も使っていない台がグループ内に1台残る。つながらない台は空きに数えない。同じ台に自分のジョブをもう1本載せるのは枠を増やさない。
+  - **全体の空き（`scheduler.min_free`、2026-10-18 から 2）**: 自分が新しく台を使い始めた後も、誰も使っていない台（自分のジョブも無い台）が全体で `min_free` 台は残る。GPU が無く使えない台（`scheduler.always_free`。gpu3）は常に空きに数え、つながらない台は数えない。同じ台にもう1本載せるのは枠を使わない。チームごとの予約（`reserve_groups`）は使わず空にした（書けば併用できる）。`GET /api/machines` は余裕（`min_free_slack` = 今の空き − `min_free`）も返す。
   - 候補の中では `priority` の大きい順（5090 の gpu1 を最優先にする）。候補が無ければ409（全台が不通なら502）で、台ごとの理由を返す。
 - 起動時に台を指定してもルールは適用される（`POST /api/runs/{id}/start?machine=`、`ctl start --machine`）。ルールを変えるときは `server.toml` の `[scheduler]` と `priority` を書き換える。
 - **測定の負荷**: 測るのは必要なときだけ（Monitor タブを開いている間、下書きを開いている間、起動の判定）。常駐の測定ループは持たない。ssh は `ControlMaster`（`ControlPersist=10m`）で台ごとに1本の接続を使い回す。画面の更新で使う測定は `scheduler.probe_ttl_sec`（5秒）キャッシュし、つながらなかった台は `scheduler.unreachable_retry_sec`（30秒）の間は測り直さない。起動の判定だけは毎回測り直す。
