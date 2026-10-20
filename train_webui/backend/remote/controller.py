@@ -183,12 +183,16 @@ class RemoteController:
             "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits; echo ---; "
             "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits; echo ---; "
             "head -n1 /proc/stat; sleep 0.5; head -n1 /proc/stat; echo ---; "
-            f"ls {shlex.quote(self._lease_dir())} 2>/dev/null | wc -l"
+            f"ls {shlex.quote(self._lease_dir())} 2>/dev/null | wc -l; echo ---; "
+            # コンテナ内から見える GPU プロセスのメモリ = 自分たち（コンテナの外の他の人のプロセスは見えない）
+            "nvidia-smi --query-compute-apps=used_memory --format=csv,noheader,nounits; echo ---; "
+            # コンテナ内のプロセスの CPU 合計（常駐の tailscaled・sshd・この確認自体は除く）とコア数
+            "nproc; ps -eo pcpu=,comm= | awk '$2!~/^(tailscaled|sshd|sinit|sh|ps|awk|sleep|nvidia-smi|head|ls|wc)$/{s+=$1}END{print s+0}'"
         )
         proc = self._ssh_run(cmd, timeout=_SSH_TIMEOUT_SEC)
         self._check(proc, "GPU/CPU使用状況の確認")
         parts = proc.stdout.decode("utf-8", errors="replace").split("---")
-        if len(parts) != 5:
+        if len(parts) != 7:
             raise RemoteError(f"GPU使用状況の出力を解釈できませんでした: {proc.stdout[-500:]!r}")
 
         def ints(t: str) -> list[int]:
@@ -203,7 +207,16 @@ class RemoteController:
             idle = (cpu[1][3] + cpu[1][4]) - (cpu[0][3] + cpu[0][4])
             cpu_util = 100.0 * (tot - idle) / tot if tot > 0 else 0.0
         leases = (ints(parts[4]) or [0])[0]
-        return GpuUsage(total_used_mib=used, own_mib=0, total_mib=total_mem, gpu_util_pct=gpu_util, cpu_util_pct=cpu_util, leases=leases)
+        own_mib = sum(ints(parts[5]))
+        nums = parts[6].split()
+        own_cpu = 0.0
+        if len(nums) >= 2:
+            try:
+                own_cpu = min(100.0, float(nums[1]) / max(float(nums[0]), 1.0))
+            except ValueError:
+                pass
+        return GpuUsage(total_used_mib=used, own_mib=own_mib, total_mib=total_mem, gpu_util_pct=gpu_util, cpu_util_pct=cpu_util,
+                        own_cpu_pct=own_cpu, leases=leases)
 
     def monitor(self) -> dict:
         # /proc/stat を 0.5 秒あけて2回読み、差分からコアごとの使用率を出す。GPU は nvidia-smi を1回

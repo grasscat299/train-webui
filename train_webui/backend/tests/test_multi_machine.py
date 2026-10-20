@@ -269,3 +269,14 @@ def test_infer_does_not_fall_back_when_source_unreachable_or_machine_given_and_n
     fakes["b1"].gpu = GpuUsage(total_used_mib=9000, own_mib=0, gpu_util_pct=80.0, total_mib=BIG)
     r = client.post("/api/groups/infer", json={"project": "proj_a", "run_id": run["run_id"]})
     assert r.status_code == 409 and "代わりの台もありません" in r.json()["detail"]
+
+
+def test_own_process_outside_webui_is_own_not_other(tmp_path):
+    """WebUI 以外で自分が動かしたプロセス（コンテナ内から見える CPU・GPU メモリ）は、他の人ではなく自分の使用に数える。"""
+    app, client, fakes = _setup(tmp_path)
+    fakes["a1"].gpu = GpuUsage(total_used_mib=0, own_mib=0, gpu_util_pct=0.0, cpu_util_pct=50.0, own_cpu_pct=48.0, total_mib=BIG)
+    fakes["b1"].gpu = GpuUsage(total_used_mib=0, own_mib=0, gpu_util_pct=0.0, cpu_util_pct=50.0, own_cpu_pct=0.0, total_mib=BIG)
+    ms = {m["name"]: m for m in client.get("/api/machines?fresh=true").json()["machines"]}
+    assert ms["a1"]["other_active"] is False and ms["a1"]["own_jobs"] == 1
+    assert ms["b1"]["other_active"] is True and ms["b1"]["own_jobs"] == 0
+    app.state.job_manager.shutdown()

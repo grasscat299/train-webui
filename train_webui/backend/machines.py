@@ -70,17 +70,20 @@ class MachineManager:
         out = []
         for name, usage in zip(names, usages):
             sc = self._settings.scheduler
-            # 他の人 = 自分たちの記録（lease・ジョブ）が無い台で、GPU か CPU の使用率が高いもの
+            # 他の人 = 自分たちの記録（lease・ジョブ）も自分たちのプロセスも無い分の、GPU か CPU の使用率が高いもの。
+            # コンテナ内から見える GPU メモリ・CPU は自分たち（WebUI 以外で動かしたものも含む）なので、その分は他の人に数えない
             mine = own.get(name, 0) > 0 or (usage is not None and usage.leases > 0)
+            own_proc = usage is not None and (usage.own_mib > 0 or usage.own_cpu_pct >= 2.0)
             current = (usage is not None and not mine
-                       and (usage.gpu_util_pct >= sc.gpu_util_busy_pct or usage.cpu_util_pct >= sc.cpu_util_busy_pct))
+                       and ((usage.gpu_util_pct >= sc.gpu_util_busy_pct and usage.own_mib == 0)
+                            or usage.cpu_util_pct - usage.own_cpu_pct >= sc.cpu_util_busy_pct))
             if current:
                 self._last_other_at[name] = now
             seen = self._last_other_at.get(name)
             recent = current or (seen is not None and now - seen < grace)
             out.append((MachineState(
                 name=name, priority=self._settings.machines[name].priority, reachable=usage is not None,
-                own_jobs=own.get(name, 0), other_active=recent,
+                own_jobs=own.get(name, 0) or (1 if own_proc else 0), other_active=recent,
                 free_mib=(usage.free_mib if usage is not None and usage.total_mib else None),
                 gpu_util_pct=usage.gpu_util_pct if usage is not None else 0.0,
                 cpu_util_pct=usage.cpu_util_pct if usage is not None else 0.0,

@@ -8,8 +8,8 @@ CPU0 = b"cpu  1000 0 1000 8000 0 0 0 0 0 0\n"
 CPU1_BUSY = b"cpu  1500 0 1500 8100 0 0 0 0 0 0\n"   # 差分: 全体 1100、idle 100 → 使用率 約 90.9%
 
 
-def _out(mem=b"5000\n", util=b"3\n", total=b"32607\n", cpu=CPU0 + CPU1_BUSY, leases=b"0\n"):
-    return mem + b"---\n" + util + b"---\n" + total + b"---\n" + cpu + b"---\n" + leases
+def _out(mem=b"5000\n", util=b"3\n", total=b"32607\n", cpu=CPU0 + CPU1_BUSY, leases=b"0\n", apps=b"", ps=b"24\n0\n"):
+    return mem + b"---\n" + util + b"---\n" + total + b"---\n" + cpu + b"---\n" + leases + b"---\n" + apps + b"---\n" + ps
 
 
 def test_gpu_usage_reads_utilization_cpu_and_leases(settings_factory):
@@ -24,6 +24,13 @@ def test_gpu_usage_reads_utilization_cpu_and_leases(settings_factory):
 def test_gpu_usage_sums_multiple_gpus_memory(settings_factory):
     runner = FakeRunner(responses=[ok(stdout=_out(mem=b"100\n200\n"))])
     assert RemoteController(settings_factory(), runner=runner).gpu_usage().total_used_mib == 300
+
+
+def test_gpu_usage_reads_own_process_gpu_memory_and_cpu(settings_factory):
+    # コンテナ内から見える GPU プロセスのメモリと、コンテナ内プロセスの CPU 合計（コア数 24、合計 1200% → 全体の 50%）
+    runner = FakeRunner(responses=[ok(stdout=_out(apps=b"16556\n", ps=b"24\n1200.0\n"))])
+    usage = RemoteController(settings_factory(), runner=runner).gpu_usage()
+    assert usage.own_mib == 16556 and usage.own_cpu_pct == pytest.approx(50.0)
 
 
 def test_gpu_usage_ssh_failure_raises(settings_factory):
