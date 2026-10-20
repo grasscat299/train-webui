@@ -4,6 +4,7 @@
 server が起動している必要がある。リポジトリ直下から実行する:
 
     venv/bin/python -m train_webui.ctl draft <project> [--group G | --new-group] [--name N] [--continue-from RUN_ID | --rerun-of RUN_ID]
+    venv/bin/python -m train_webui.ctl go <project> [--group G] [--continue-from RUN_ID] [--machine NAME] [--comment "..."] [--no-start] section.key=<TOMLリテラル> [...]
     venv/bin/python -m train_webui.ctl set <run_id> [--add] section.key=<TOMLリテラル> [...]
     venv/bin/python -m train_webui.ctl describe <project> <group> (--file パス | --text 文章 | 標準入力)
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
@@ -12,6 +13,7 @@ server が起動している必要がある。リポジトリ直下から実行�
     venv/bin/python -m train_webui.ctl infer <project> [<group> | --run RUN_ID] [--machine NAME] [--set section.key=<TOMLリテラル> ...]
     venv/bin/python -m train_webui.ctl stop <run_id> [--graceful]
 
+- `go` は、draft を作り、`set` し（無いキーは足して、足したキーを表示する）、反映を確かめて、start までを 1 コマンドで行う（起動後に、見張りのコマンドを出す）。
 - `describe` は group（=モデル構成）の説明（Markdown）を上書きする。group は group_id でも表示名でもよい。
   モデルの作りを Claude が後から読めるようにするためのもの。新しいモデルを作ったら書く。
 - `draft` は新しい下書き run を作って run_id を出す（config は WebUI の「新規 run」と同じ作り方）。
@@ -100,6 +102,48 @@ def cmd_set(api: Api, args: argparse.Namespace) -> None:
     print(diff if diff else "変更なし")
 
 
+def apply_assignments(text: str, assignments: list[str]) -> tuple[str, list[str]]:
+    """`section.key=値` を config に反映する。既存のキーはそのまま書き換え、無いキーは足す（足したキーを返す。タイプミスに気づけるよう、呼び出し側が表示する）。"""
+    added: list[str] = []
+    for a in assignments:
+        key, eq, literal = a.partition("=")
+        if not eq:
+            raise CtlError(f"`section.key=値` の形で指定してください: {a!r}")
+        try:
+            text = set_value(text, key.strip(), literal.strip(), add_missing=False)
+        except TomlValidationError:
+            try:
+                text = set_value(text, key.strip(), literal.strip(), add_missing=True)
+            except TomlValidationError as e:
+                raise CtlError(str(e)) from e
+            added.append(key.strip())
+    return text, added
+
+
+def cmd_go(api: Api, args: argparse.Namespace) -> None:
+    """draft → set（無いキーは足す）→ 反映の確認 → start を 1 コマンドでやる。"""
+    body = {"project": args.project, "group": args.group, "new_group": args.new_group, "group_name": args.name,
+            "parent_run_id": args.continue_from, "rerun_of": None}
+    run = api.call("POST", "/api/runs/draft", body)
+    run_id, old = run["run_id"], run["config_toml"]
+    text, added = apply_assignments(old, args.assignments)
+    if text != old:
+        api.call("PUT", f"/api/runs/{run_id}/config", {"config_toml": text})
+    saved = api.call("GET", f"/api/runs/{run_id}")["config_toml"]
+    if saved != text:                                                 # 反映されなかった（以前、set が黙って失敗したことがある）
+        raise CtlError(f"{run_id}: config が反映されていません。start しません")
+    if args.comment:
+        api.call("PUT", f"/api/runs/{run_id}/comment", {"comment": args.comment})
+    diff = "".join(difflib.unified_diff(old.splitlines(True), text.splitlines(True), "draft", "set", n=0))
+    print(f"run_id: {run_id}\n" + (diff or "変更なし") + (f"\n新しく足したキー: {', '.join(added)}" if added else ""))
+    if args.no_start:
+        return
+    query = f"?machine={urllib.parse.quote(args.machine)}" if args.machine else ""
+    started = api.call("POST", f"/api/runs/{run_id}/start{query}")
+    _show_run(started)
+    print(f"\n見張り: venv/bin/python -m auto_loop.watch {run_id} --nan   # run_in_background で起動する（終了・失敗・NaN で起こされる）")
+
+
 def cmd_describe(api: Api, args: argparse.Namespace) -> None:
     if args.text is not None:
         text = args.text
@@ -165,6 +209,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--continue-from", metavar="RUN_ID", help="この run の重みから続きを学習する下書き（同じ group・同じ config から）")
     s.add_argument("--rerun-of", metavar="RUN_ID", help="この run を起動した時点のコードで再実行する下書き（同じ group・同じ config から）")
     s.set_defaults(func=cmd_draft)
+
+    s = sub.add_parser("go", help="draft → set（無いキーは足す）→ 確認 → start を 1 コマンドで")
+    s.add_argument("project")
+    s.add_argument("assignments", nargs="*", metavar="section.key=値", help="変える設定（無いキーは足し、足したキーを表示する）")
+    s.add_argument("--group", help="既存 group の group_id")
+    s.add_argument("--new-group", action="store_true")
+    s.add_argument("--name")
+    s.add_argument("--continue-from", metavar="RUN_ID")
+    s.add_argument("--machine", help="動かす台（省略時は自動選択）")
+    s.add_argument("--comment", help="run のコメント（何を試すか）")
+    s.add_argument("--no-start", action="store_true", help="起動せず、draft を作って設定するところまで")
+    s.set_defaults(func=cmd_go)
 
     s = sub.add_parser("set", help="draft の config のキーを書き換える")
     s.add_argument("run_id")

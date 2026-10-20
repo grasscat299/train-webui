@@ -93,3 +93,13 @@ def test_machines_and_start_with_machine(app_factory, capsys):
         ctl.cmd_start(api, argparse.Namespace(run_id=run_id, machine="zzz"))
     ctl.cmd_start(api, argparse.Namespace(run_id=run_id, machine="default"))
     assert "@default" in capsys.readouterr().out
+
+
+def test_apply_assignments_sets_existing_adds_missing_and_reports_added():
+    out, added = ctl.apply_assignments(CONFIG, ["train.lr=1e-2", 'train.new_key="v"', "wandb.n=3"])
+    assert "lr = 1e-2  # 学習率" in out and added == ["train.new_key", "wandb.n"]       # 既存は書き換え、無いキーは足して、足したキーを返す
+    assert 'new_key = "v"' in out and "n = 3" in out
+    with pytest.raises(ctl.CtlError):
+        ctl.apply_assignments(CONFIG, ["lr3e-4"])                                         # `=` が無い
+    out2, added2 = ctl.apply_assignments(CONFIG, [])
+    assert out2 == CONFIG and added2 == []
