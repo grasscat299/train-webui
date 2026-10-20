@@ -112,9 +112,12 @@ function ownerLabel(mi?: MachineInfo): string | null {
 
 function Card({ m, hours, rows, info }: { m: LabNow; hours: number; rows: LabHistoryRow[]; info?: MachineInfo }) {
   const owner = ownerLabel(info);
+  // 使用中の判定は ctl machines（スケジューラ）と同じ: 自分のジョブがある、または GPU/CPU の使用率で他の人の使用を検知。
+  // 台の情報が無い間だけ lab_monitor の in_use（VRAM のしきい値）を使う
+  const inUse = info?.reachable ? info.own_jobs > 0 || info.other_active : !!m.in_use;
   const off = m.error !== undefined;
   const noGpu = !off && m.gpu_util == null;
-  const badge = off ? ['off', '接続不可'] : noGpu ? ['off', 'GPU不明'] : m.in_use ? ['busy', '使用中'] : ['free', '空き'];
+  const badge = off ? ['off', '接続不可'] : noGpu ? ['off', 'GPU不明'] : inUse ? ['busy', '使用中'] : ['free', '空き'];
   const cpu = m.cpu ?? 0;
   return (
     <div className="lm-card">
