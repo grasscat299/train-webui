@@ -47,6 +47,7 @@ export interface MachineInfo {
   priority: number;
   reachable: boolean;
   own_jobs: number;
+  other_active: boolean; // 他の人が使っている（直近も含む）
   gpu_util_pct: number;
   cpu_util_pct: number;
   free_mib: number | null;

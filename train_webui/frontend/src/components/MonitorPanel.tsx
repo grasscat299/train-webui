@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import type { LabHistoryRow, LabNow } from '../api';
+import type { LabHistoryRow, LabNow, MachineInfo } from '../api';
 import { usePolling } from '../hooks/usePolling';
 
 // Monitor タブ。gpu5 の lab_monitor server（GET /api/lab/now, /api/lab/history）の値を、lab_monitor の画面と同じ見た目で出す。
@@ -101,7 +101,17 @@ function Bar({ label, value, text, width }: { label: string; value?: string; tex
   );
 }
 
-function Card({ m, hours, rows }: { m: LabNow; hours: number; rows: LabHistoryRow[] }) {
+// 誰が使っているか。自分たちのジョブ（own_jobs）があれば自分、無くて他の人の使用を検知していれば他の人。
+// train_webui の画面だけに出す（lab_monitor 本体の画面はほかの人も見るので出さない）
+function ownerLabel(mi?: MachineInfo): string | null {
+  if (!mi || !mi.reachable) return null;
+  if (mi.own_jobs > 0) return '自分が使用中';
+  if (mi.other_active) return '他の人が使用中';
+  return null;
+}
+
+function Card({ m, hours, rows, info }: { m: LabNow; hours: number; rows: LabHistoryRow[]; info?: MachineInfo }) {
+  const owner = ownerLabel(info);
   const off = m.error !== undefined;
   const noGpu = !off && m.gpu_util == null;
   const badge = off ? ['off', '接続不可'] : noGpu ? ['off', 'GPU不明'] : m.in_use ? ['busy', '使用中'] : ['free', '空き'];
@@ -110,7 +120,7 @@ function Card({ m, hours, rows }: { m: LabNow; hours: number; rows: LabHistoryRo
     <div className="lm-card">
       <div className="lm-top">
         <div><span className="lm-name">{m.title || m.name}</span> <span className="lm-lab">{m.label}</span></div>
-        <span className={`lm-badge ${badge[0]}`}>{badge[1]}</span>
+        <span className={`lm-badge ${badge[0]}`}>{badge[1]}{owner && `（${owner}）`}</span>
       </div>
       {off ? (
         <p className="lm-err">{m.error}</p>
@@ -132,6 +142,8 @@ function Card({ m, hours, rows }: { m: LabNow; hours: number; rows: LabHistoryRo
 export function MonitorPanel() {
   const [hours, setHours] = useState(1);
   const { data, error } = usePolling(() => api.getLabNow(), NOW_INTERVAL_MS, []);
+  const { data: machines } = usePolling(() => api.getMachines(), NOW_INTERVAL_MS, []);
+  const infoByName = Object.fromEntries((machines?.machines ?? []).map((i) => [i.name, i]));
   const [hist, setHist] = useState<Record<string, LabHistoryRow[]>>({});
   const names = (data ?? []).map((m) => m.name).join(',');
   // 履歴は台ごとに、範囲を変えた時と 1 分ごとに取り直す
@@ -152,7 +164,7 @@ export function MonitorPanel() {
       {error && <div className="error-banner">{error}</div>}
       {!data && !error && <p className="mon-note">取得中…</p>}
       <div className="lm-grid">
-        {(data ?? []).map((m) => <Card key={m.name} m={m} hours={hours} rows={hist[m.name] ?? []} />)}
+        {(data ?? []).map((m) => <Card key={m.name} m={m} hours={hours} rows={hist[m.name] ?? []} info={infoByName[m.name]} />)}
       </div>
     </div>
   );
