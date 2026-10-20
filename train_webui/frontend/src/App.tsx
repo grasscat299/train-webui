@@ -185,6 +185,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewKey, tree === null]);
 
+  // 「台が空いているのに Claude が止まっている」通知（server の idle_alert）。20 秒ごとに取る
+  const [idleAlerts, setIdleAlerts] = useState<{ kind: string; message: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () => api.getAlerts().then((r) => { if (!cancelled) setIdleAlerts(r.alerts); }).catch(() => {});
+    tick();
+    const timer = window.setInterval(tick, 20000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
   // 右のコメント欄: Train タブでは選択中の run、Result タブでは比較中の run
   const [commentsOpenDesktop, setCommentsOpen] = usePersistentState<boolean>('commentsOpen', true);
   // スマホでは左のツリー・右のコメント欄を、ボタンで開く引き出しにする（開始時は閉じておく）
@@ -295,6 +305,11 @@ export default function App() {
             </span>
           )}
         </header>
+        {idleAlerts.map((a) => (
+          <div key={a.kind} className="warn-banner" role="alert">
+            {a.message}
+          </div>
+        ))}
         {actionError && (
           <div className="error-banner clickable" onClick={() => setActionError(null)}>
             {actionError}（クリックで閉じる）

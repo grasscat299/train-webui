@@ -62,6 +62,16 @@ class MonitorSettings:
 
 
 @dataclass(frozen=True)
+class NotifySettings:
+    """「台が空いているのに Claude が止まっている」ときの通知（idle_alert.py）。"""
+    enabled: bool = True
+    idle_after_sec: float = 600.0      # Claude の最後の活動（heartbeat）からこの秒数たったら「止まっている」とみなす
+    renotify_sec: float = 1800.0       # 同じ通知を、この秒数あけて繰り返す（webhook）
+    check_interval_sec: float = 30.0
+    webhook_url: str = ""              # 空なら画面のバナーだけ。値があれば、通知のたびに POST する（ntfy.sh など。{"message": ...} の JSON）
+
+
+@dataclass(frozen=True)
 class Settings:
     remote: RemoteSettings  # 既定のマシン。1台構成の呼び出し側（check_remote・既存テスト）はこれを読む
     server: ServerSettings
@@ -82,6 +92,7 @@ class Settings:
     default_machine: str = "default"
     scheduler: SchedulerSettings = field(default_factory=SchedulerSettings)
     monitor: MonitorSettings = field(default_factory=MonitorSettings)
+    notify: NotifySettings = field(default_factory=NotifySettings)
 
     def __post_init__(self) -> None:
         if not self.machines:  # remote だけ渡された場合（テスト等）は、それを唯一のマシンとして扱う
@@ -148,6 +159,7 @@ def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
         scheduler=_parse_scheduler(raw.get("scheduler", {}), machines),
         monitor=MonitorSettings(url=str(raw.get("monitor", {}).get("url", "")).rstrip("/"),
                                 timeout_sec=float(raw.get("monitor", {}).get("timeout_sec", 8))),
+        notify=NotifySettings(**{k: type(getattr(NotifySettings, k))(v) for k, v in raw.get("notify", {}).items() if hasattr(NotifySettings, k)}),
         project_scan_interval_sec=float(raw.get("log", {}).get("project_scan_interval_sec", 30)),
     )
 

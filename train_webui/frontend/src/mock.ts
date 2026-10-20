@@ -840,6 +840,7 @@ export const mockApi: Api = {
   getResults,
   getLabels,
   getMetricDocs,
+  getAlerts: async () => ({ alerts: [] }),
   getMachines: async () => ({
     default: 'gpu1',
     selected: 'gpu1',

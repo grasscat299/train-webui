@@ -293,6 +293,7 @@ export interface Api {
   updateConfig(runId: string, configToml: string): Promise<Run>;
   startRun(runId: string, machine?: string | null): Promise<Run>;
   getMachines(): Promise<MachinesResp>;
+  getAlerts(): Promise<{ alerts: { kind: string; message: string; machines: string[]; since: number }[] }>;
   stopRun(runId: string, graceful?: boolean): Promise<Run>;
   deleteRun(runId: string): Promise<void>;
   groupInfer(project: string, group: string): Promise<Job>;
@@ -385,6 +386,7 @@ const realApi: Api = {
       method: 'POST',
     }),
   getMachines: () => request<MachinesResp>('/api/machines'),
+  getAlerts: () => request<{ alerts: { kind: string; message: string; machines: string[]; since: number }[] }>('/api/alerts'),
   stopRun: (runId, graceful = false) =>
     request<Run>(`/api/runs/${encodeURIComponent(runId)}/stop${graceful ? '?graceful=true' : ''}`, { method: 'POST' }),
   deleteRun: (runId) => request<void>(`/api/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),

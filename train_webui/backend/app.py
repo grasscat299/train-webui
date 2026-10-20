@@ -29,6 +29,7 @@ from .decimate import decimate_minmax, decimate_stride
 from .ids import new_group_id, new_run_id
 from .jobs import JobBusyError, JobManager
 from .remote.errors import RemoteError
+from .idle_alert import IdleAlert
 from .machines import MachineManager, SelectionError
 from .remote.registry import RemoteRegistry
 from .remote.types import RemoteControllerProtocol
@@ -392,6 +393,20 @@ def create_app(
 
     machine_manager = MachineManager(settings, registry, job_manager.own_jobs_by_machine)
     app.state.machine_manager = machine_manager
+    idle_alert = IdleAlert(machine_manager.status, settings.notify)
+    app.state.idle_alert = idle_alert
+    if start_background and settings.notify.enabled:
+        idle_alert.start_background()
+
+    @app.post("/api/claude/heartbeat", status_code=204)
+    def claude_heartbeat() -> None:
+        """Claude Code のフックが、動いている印として呼ぶ。"""
+        idle_alert.heartbeat()
+
+    @app.get("/api/alerts")
+    def get_alerts() -> dict:
+        """画面のバナー用: 今の通知（台が空いているのに Claude が止まっている）。"""
+        return {"alerts": idle_alert.alerts()}
 
     def choose_machine(requested: str | None) -> str:
         """起動する台を決める（他の人の使用・チームの枠・空きメモリの確認を含む。design.md §4）。"""

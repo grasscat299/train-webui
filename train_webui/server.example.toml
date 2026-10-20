@@ -26,6 +26,12 @@ stop_timeout_sec = 10                                 # SIGTERM後、SIGKILLま�
 # cpu_util_busy_pct = 30                                      # 同じく CPU 使用率（全体）
 # other_grace_sec = 300                                       # 他の人の使用が見えなくなってから、使用中とみなし続ける秒数
 
+[notify]                                   # 台が空いているのに Claude が止まっている時の通知（画面のバナー。webhook_url があれば push も）
+# enabled = true
+# idle_after_sec = 600                     # Claude の最後の活動（.claude/settings.json のフックが POST /api/claude/heartbeat）からこの秒数で「止まっている」
+# renotify_sec = 1800                      # webhook の再通知の間隔
+# webhook_url = ""                         # 例: "https://ntfy.sh/<自分の topic>"（{"message": ...} の JSON を POST）
+
 [monitor]                                  # Monitor タブの取得先（gpu5 の lab_monitor server。tailscale の IP）
 url         = "http://100.100.0.15:8080"
 timeout_sec = 8
