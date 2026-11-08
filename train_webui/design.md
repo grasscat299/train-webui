@@ -293,7 +293,7 @@ DVC（run管理機能・checkpoint/データ管理とも）は使わない。コ
   例: `rsync -a --partial data/ <remote>:<repo_dir>/data/`
 - `--delete` は付けない（`replays` のように学習用PC側で生成されるデータを消さないため）。
 - world_model系は合成データをその場で生成するため、送るデータ自体が無い。
-- `data/dataset` は外部リポジトリのsparse clone（`docs/data-structure.md`）なので、学習用PCが
+- `data/dataset` は外部リポジトリのsparse clone（`docs/reference/data-structure.md`）なので、学習用PCが
   インターネットに出られるなら学習用PCで直接cloneする方が速い。組織の共有ストレージ（NFS等）が
   両PCから見えるならそれを使ってもよい。
 
