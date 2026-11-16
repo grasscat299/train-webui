@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -60,3 +61,49 @@ def export_commit(repo_root: Path, commit: str, dest: Path) -> None:
 def delete_ref(repo_root: Path, run_id: str) -> None:
     """run を消すとき ref も消す。ref が無くても何もしない。"""
     subprocess.run(["git", "-C", str(repo_root), "update-ref", "-d", REF_PREFIX + run_id], capture_output=True)
+
+
+# ---- 送るコードを git の ref から作る（[sync] source_ref） -----------------------------------------
+
+def resolve_ref(repo_root: Path, ref: str) -> str:
+    """ref（master・タグ・commit など）が指す commit のハッシュ。無ければ ValueError。作業ツリー・HEAD には依らない。"""
+    proc = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise ValueError(f"git の ref が見つかりません: {ref!r}")
+    return proc.stdout.strip()
+
+
+def ensure_commit_cache(repo_root: Path, commit: str, cache_root: Path, keep: int = 6) -> Path:
+    """commit の中身（git archive。追跡されているファイルだけ）を cache_root/<commit>/ に取り出して返す。
+    すでにあれば作り直さない（commit の中身は変わらない）。作りかけは .tmp-* に作って rename するので、途中の物は使われない。
+    古い物は新しい keep 個を残して消す。"""
+    cache_root.mkdir(parents=True, exist_ok=True)
+    dest = cache_root / commit
+    if dest.is_dir():
+        dest.touch()
+        return dest
+    tmp = Path(tempfile.mkdtemp(prefix=".tmp-", dir=cache_root))
+    try:
+        archive = subprocess.Popen(["git", "-C", str(repo_root), "archive", "--format=tar", commit],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert archive.stdout is not None and archive.stderr is not None
+        tar = subprocess.run(["tar", "-x", "-C", str(tmp)], stdin=archive.stdout, capture_output=True)
+        archive.stdout.close()
+        err = archive.stderr.read().decode("utf-8", errors="replace")
+        archive.stderr.close()
+        if archive.wait() != 0 or tar.returncode != 0:
+            raise RuntimeError(f"git archive {commit} に失敗しました: {err.strip()} {tar.stderr.decode(errors='replace').strip()}")
+        try:
+            tmp.rename(dest)
+        except OSError:  # 別のスレッドが先に作った
+            if not dest.is_dir():
+                raise
+    finally:
+        if tmp.exists():
+            shutil.rmtree(tmp, ignore_errors=True)
+    old = sorted((d for d in cache_root.iterdir() if d.is_dir() and not d.name.startswith(".tmp-") and d != dest),
+                 key=lambda d: d.stat().st_mtime, reverse=True)
+    for d in old[max(0, keep - 1):]:
+        shutil.rmtree(d, ignore_errors=True)
+    return dest

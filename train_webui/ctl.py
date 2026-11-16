@@ -4,12 +4,12 @@
 server が起動している必要がある。リポジトリ直下から実行する:
 
     venv/bin/python -m train_webui.ctl draft <project> [--group G | --new-group] [--name N] [--continue-from RUN_ID | --rerun-of RUN_ID]
-    venv/bin/python -m train_webui.ctl go <project> [--group G] [--continue-from RUN_ID] [--machine NAME] [--comment "..."] [--no-start] section.key=<TOMLリテラル> [...]
+    venv/bin/python -m train_webui.ctl go <project> [--group G] [--continue-from RUN_ID] [--machine NAME] [--ref REF] [--comment "..."] [--no-start] section.key=<TOMLリテラル> [...]
     venv/bin/python -m train_webui.ctl set <run_id> [--add] section.key=<TOMLリテラル> [...]
     venv/bin/python -m train_webui.ctl describe <project> <group> (--file パス | --text 文章 | 標準入力)
     venv/bin/python -m train_webui.ctl comment <run_id> <text>
     venv/bin/python -m train_webui.ctl machines
-    venv/bin/python -m train_webui.ctl start <run_id> [--machine NAME]
+    venv/bin/python -m train_webui.ctl start <run_id> [--machine NAME] [--ref REF]
     venv/bin/python -m train_webui.ctl infer <project> [<group> | --run RUN_ID] [--machine NAME] [--set section.key=<TOMLリテラル> ...]
     venv/bin/python -m train_webui.ctl stop <run_id> [--graceful]
 
@@ -26,6 +26,8 @@ server が起動している必要がある。リポジトリ直下から実行�
   ルールは同じく適用され、使えない台は断られる。引き継ぎ学習は元の run の台に固定される。
 - `infer` は、その run を学習した台が使えればそこで動かす。使えない（自分の別のジョブ・他の人の使用・空きの決まり）ときは、
   使える別の台に重みを自動で送って動かす。`--machine NAME` で台を指定でもできる（元の台と違えば重みを送る）。
+- 学習用PCへ送るコードは、server.toml の `[sync] source_ref`（既定 master）の commit の中身から作る。作業ツリーの HEAD・未コミットの変更には依らない。
+  `start --ref REF`（`go --ref REF`）でその run だけ別の ref（branch・タグ・commit）にでき、`--ref worktree` なら作業ツリーをそのまま送る。送った commit は run の `git_commit` に残る。
 - `start` / `infer` は GPU が使用中なら server が断る。
 """
 from __future__ import annotations
@@ -138,7 +140,7 @@ def cmd_go(api: Api, args: argparse.Namespace) -> None:
     print(f"run_id: {run_id}\n" + (diff or "変更なし") + (f"\n新しく足したキー: {', '.join(added)}" if added else ""))
     if args.no_start:
         return
-    query = f"?machine={urllib.parse.quote(args.machine)}" if args.machine else ""
+    query = _start_query(args)
     started = api.call("POST", f"/api/runs/{run_id}/start{query}")
     _show_run(started)
     print(f"\n見張り: venv/bin/python -m auto_loop.watch {run_id} --nan   # run_in_background で起動する（終了・失敗・NaN で起こされる）")
@@ -168,8 +170,17 @@ def cmd_comment(api: Api, args: argparse.Namespace) -> None:
     _show_run(api.call("PUT", f"/api/runs/{args.run_id}/comment", {"comment": args.text}))
 
 
+def _start_query(args: argparse.Namespace) -> str:
+    parts = []
+    if args.machine:
+        parts.append(f"machine={urllib.parse.quote(args.machine)}")
+    if getattr(args, "ref", None) is not None:
+        parts.append(f"ref={urllib.parse.quote(args.ref)}")
+    return "?" + "&".join(parts) if parts else ""
+
+
 def cmd_start(api: Api, args: argparse.Namespace) -> None:
-    query = f"?machine={urllib.parse.quote(args.machine)}" if args.machine else ""
+    query = _start_query(args)
     _show_run(api.call("POST", f"/api/runs/{args.run_id}/start{query}"))
 
 
@@ -218,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--name")
     s.add_argument("--continue-from", metavar="RUN_ID")
     s.add_argument("--machine", help="動かす台（省略時は自動選択）")
+    s.add_argument("--ref", help="この run だけ、送るコードの git ref（省略時は [sync] source_ref = 通常 master。`worktree` で作業ツリー）")
     s.add_argument("--comment", help="run のコメント（何を試すか）")
     s.add_argument("--no-start", action="store_true", help="起動せず、draft を作って設定するところまで")
     s.set_defaults(func=cmd_go)
@@ -246,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("start", help="draft の学習を開始する")
     s.add_argument("run_id")
     s.add_argument("--machine", help="動かす台の名前（省略時は自動選択。`machines` で確認）")
+    s.add_argument("--ref", help="この run だけ、送るコードの git ref（省略時は server.toml の [sync] source_ref = 通常 master。"
+                                 "`worktree` なら作業ツリーをそのまま送る）")
     s.set_defaults(func=cmd_start)
 
     s = sub.add_parser("stop", help="実行中の run を止める")

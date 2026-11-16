@@ -79,6 +79,9 @@ class Settings:
     lost_after_sec: float
     sync_exclude: list[str]
     repo_root: Path
+    # 学習用PCへ送るコードの元（[sync] source_ref）。git の ref（master・タグ・commit）を書くと、その commit の中身を送る
+    # （作業ツリーの HEAD・未コミットの変更には依らない）。空なら従来どおり作業ツリーをそのまま送る
+    sync_ref: str = "master"
     # 起動前チェック: 自分たち以外が学習用PCのGPUメモリをこれより多く使っていたら起動しない（design.md §4）
     gpu_busy_threshold_mib: float = 1024.0
     # 同時に動かせるジョブ（学習・推論）の数。1 = 従来どおり排他。2 以上にすると、ジョブごとにコードを複製して動かし、
@@ -153,6 +156,7 @@ def settings_from_dict(raw: dict, repo_root: Path = REPO_ROOT) -> Settings:
         lost_after_sec=float(raw["heartbeat"]["lost_after_sec"]),
         sync_exclude=list(raw["sync"]["exclude"]),
         repo_root=repo_root,
+        sync_ref=str(raw["sync"].get("source_ref", "master")).strip(),
         gpu_busy_threshold_mib=float(raw.get("gpu", {}).get("busy_threshold_mib", 1024)),
         max_parallel_jobs=int(raw.get("gpu", {}).get("max_parallel_jobs", 1)),
         job_headroom_mib=float(raw.get("gpu", {}).get("job_headroom_mib", 4096)),

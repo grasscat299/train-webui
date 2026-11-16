@@ -178,7 +178,7 @@ def _run_summary(row: dict, group_name: str | None = None) -> dict:
         "origin": row["origin"], "status": row["status"],
         "created_at": row["created_at"], "started_at": row["started_at"], "ended_at": row["ended_at"],
         "comment": row["comment"] or "", "parent_run_id": row.get("parent_run_id"),
-        "code_commit": row.get("code_commit"), "machine": row.get("machine"),
+        "code_commit": row.get("code_commit"), "machine": row.get("machine"), "sync_ref": row.get("sync_ref"),
     }
 
 
@@ -364,6 +364,10 @@ def create_app(
         snapshot_kwargs = {
             "snapshot_code": lambda run_id: code_snapshot.snapshot_code(settings.repo_root, run_id),
             "export_code": lambda commit, dest: code_snapshot.export_commit(settings.repo_root, commit, dest),
+            # 学習用PCへ送るコードを、作業ツリーでなく [sync] source_ref（run ごとの上書きも可）の commit から作る
+            "resolve_ref": lambda ref: code_snapshot.resolve_ref(settings.repo_root, ref),
+            "export_ref": lambda commit: code_snapshot.ensure_commit_cache(
+                settings.repo_root, commit, settings.server.db_path.parent / "code_cache"),
             "tag_code": lambda run_id, commit: code_snapshot.set_ref(settings.repo_root, run_id, commit),
         }
     job_manager = JobManager(settings, db, registry, launch_in_background=start_background, **snapshot_kwargs)
@@ -694,7 +698,8 @@ def create_app(
         return Response(status_code=204)
 
     @app.post("/api/runs/{run_id}/start")
-    async def start_run(run_id: str, machine: str | None = None) -> dict:
+    async def start_run(run_id: str, machine: str | None = None, ref: str | None = None) -> dict:
+        """ref: この run だけ送るコードの git ref（省略 = [sync] source_ref、"worktree" = 作業ツリーのまま）。"""
         run = db.get_run(run_id)
         if run is None:
             raise HTTPException(404, "run が見つかりません")
@@ -702,9 +707,11 @@ def create_app(
             raise HTTPException(409, "draftではないrunは開始できません")
         chosen = await run_in_threadpool(choose_machine, required_machine(run, machine))
         try:
-            await run_in_threadpool(job_manager.start_train, run_id, chosen)
+            await run_in_threadpool(job_manager.start_train, run_id, chosen, ref)
         except JobBusyError as e:
             raise HTTPException(409, str(e)) from e
+        except ValueError as e:  # 無い ref
+            raise HTTPException(400, str(e)) from e
         return _run_detail(db, db.get_run(run_id))
 
     @app.post("/api/runs/{run_id}/stop")

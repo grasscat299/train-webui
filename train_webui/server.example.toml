@@ -63,6 +63,10 @@ busy_threshold_mib = 1024
 # job_headroom_mib  = 4096
 
 [sync]
+# 学習用PCへ送るコードの元。git の ref を書くと、その commit の中身（git archive）だけを送る。作業ツリーの HEAD や
+# 未コミットの変更・未追跡のファイルには依らない（作業ツリーは user や他のセッションも使うため）。既定は "master"。
+# run ごとに `ctl start --ref REF`（下書きは `ctl draft --ref REF`）で上書きできる。空文字 "" なら、従来どおり作業ツリーをそのまま送る。
+source_ref = "master"
 # コードrsync（design.md §4.5）で除外するパス（rsyncの --exclude パターン）。
 exclude = [
   ".git/", "venv/", ".venv/", "wandb/", "__pycache__/", "*.pyc",

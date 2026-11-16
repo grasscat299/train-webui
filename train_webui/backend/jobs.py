@@ -27,11 +27,17 @@ class JobManager:
                  launch_in_background: bool = True,
                  snapshot_code: Callable[[str], str] | None = None,
                  export_code: Callable[[str, Path], None] | None = None,
-                 tag_code: Callable[[str, str], None] | None = None) -> None:
+                 tag_code: Callable[[str, str], None] | None = None,
+                 resolve_ref: Callable[[str], str] | None = None,
+                 export_ref: Callable[[str], Path] | None = None) -> None:
+        # resolve_ref(ref) -> commit / export_ref(commit) -> その commit の中身のディレクトリ（キャッシュ）。
+        # 両方あると、送るコードを作業ツリーでなく git の ref（run の sync_ref か [sync] source_ref）から作る。None（テスト等）なら作業ツリー
         # snapshot_code(run_id) -> commit: 起動時のコードを ref にして残す。export_code(commit, dest): 過去のコードを取り出す
         # どちらも None のとき（テスト等）はコードの記録・復元をしない
         self._snapshot_code = snapshot_code
         self._export_code = export_code
+        self._resolve_ref = resolve_ref
+        self._export_ref = export_ref
         self._tag_code = tag_code  # tag_code(run_id, commit): 再実行する run にも、同じ commit への ref を付ける
         self._settings = settings
         self._db = db
@@ -119,15 +125,33 @@ class JobManager:
 
     # ---- 起動 --------------------------------------------------------
 
-    def start_train(self, run_id: str, machine: str | None = None) -> None:
+    def effective_ref(self, run: dict) -> str:
+        """この run が送るコードの ref。run に上書きがあればそれ、無ければ [sync] source_ref。空 = 作業ツリー。"""
+        override = run.get("sync_ref")
+        return (override if override is not None else self._settings.sync_ref).strip()
+
+    def _sync_from_ref(self, remote: RemoteControllerProtocol, ref: str) -> str:
+        """ref が指す commit の中身を学習用PCへ送り、commit のハッシュを返す。"""
+        assert self._resolve_ref is not None and self._export_ref is not None
+        commit = self._resolve_ref(ref)
+        remote.sync_code(self._export_ref(commit))
+        return commit
+
+    def start_train(self, run_id: str, machine: str | None = None, ref: str | None = None) -> None:
         """draft を起動する。jobを確保したら戻り、sync_code → launch は裏で進める（rsyncが長いため）。
         machine は動かす台（None なら既定のマシン。自動選択は呼び出し側 = MachineManager.choose）。"""
         run = self._db.get_run(run_id)
         if run is None:
             raise ValueError("run が見つかりません")
         machine = machine or self._registry.default_name
+        if ref is not None:  # この run だけの上書き。"worktree" は作業ツリーから送る（[sync] source_ref = "" と同じ）
+            ref = "" if ref.strip() == "worktree" else ref.strip()
+            run = {**run, "sync_ref": ref}
+        if self._resolve_ref is not None and self.effective_ref(run):
+            self._resolve_ref(self.effective_ref(run))  # 無い ref は起動前に断る（ValueError）
         job_id = self._reserve_job(run_id, kind="train", machine=machine)
-        self._db.update_run(run_id, status="running", started_at=now_iso(), machine=machine)
+        self._db.update_run(run_id, status="running", started_at=now_iso(), machine=machine,
+                            **({"sync_ref": ref} if ref is not None else {}))
         self._spawn(self._launch_train, run_id, job_id, run, machine)
 
     def _spawn(self, fn, *args) -> None:
@@ -148,6 +172,15 @@ class JobManager:
                 self._sync_recorded_code(run["code_commit"], remote)
                 if self._tag_code is not None:
                     self._tag_code(run_id, run["code_commit"])
+            elif self._resolve_ref is not None and self._export_ref is not None and self.effective_ref(run):
+                # 作業ツリーでなく git の ref の commit を送る。送った commit は git_commit と code_commit に残す
+                ref = self.effective_ref(run)
+                commit = self._sync_from_ref(remote, ref)
+                self._db.create_sync(synced_at=now_iso(), git_commit=commit, git_diff="", git_untracked="{}")
+                self._db.update_run(run_id, git_commit=commit, git_diff="", git_untracked="{}",
+                                    git_info_source=f"ref:{ref}", code_commit=commit)
+                if self._tag_code is not None:
+                    self._tag_code(run_id, commit)
             else:
                 sync_info = remote.sync_code()
                 self._db.create_sync(
@@ -200,11 +233,15 @@ class JobManager:
     def _launch_infer_locked(self, run_id: str, job_id: str, run: dict, project: str, machine: str) -> None:
         remote = self._registry.get(machine)
         try:
-            sync_info = remote.sync_code()
-            self._db.create_sync(
-                synced_at=now_iso(), git_commit=sync_info.git_commit,
-                git_diff=sync_info.git_diff, git_untracked=sync_info.git_untracked,
-            )
+            if self._resolve_ref is not None and self._export_ref is not None and self.effective_ref(run):
+                commit = self._sync_from_ref(remote, self.effective_ref(run))
+                self._db.create_sync(synced_at=now_iso(), git_commit=commit, git_diff="", git_untracked="{}")
+            else:
+                sync_info = remote.sync_code()
+                self._db.create_sync(
+                    synced_at=now_iso(), git_commit=sync_info.git_commit,
+                    git_diff=sync_info.git_diff, git_untracked=sync_info.git_untracked,
+                )
             spec = LaunchSpec(
                 run_id=run_id, job_id=job_id, kind="infer",
                 project_dir=project, config_toml=run["config_toml"],
