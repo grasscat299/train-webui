@@ -184,6 +184,8 @@ class Database:
                 conn.execute("ALTER TABLE runs ADD COLUMN parent_run_id TEXT")
             if "machine" not in cols:  # 学習を動かした学習用PCの名前（server.toml の [remote.<名前>]）。追加前のDBは NULL = 既定のマシン
                 conn.execute("ALTER TABLE runs ADD COLUMN machine TEXT")
+            if "sync_ref" not in cols:  # この run だけ送るコードの ref を上書きした値（NULL = server.toml の [sync] source_ref。"" = 作業ツリー）
+                conn.execute("ALTER TABLE runs ADD COLUMN sync_ref TEXT")
             jcols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
             if "machine" not in jcols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN machine TEXT")

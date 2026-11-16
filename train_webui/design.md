@@ -197,7 +197,7 @@ WebUI の ssh 接続先はこの instance 内の sshd なので、起動コマ�
   （手元で直接動かしたときだけ、従来どおり既存の重みがあれば続きから）。
 - **同じコードで再実行**: 「同じコードで再実行」で、元の run の config と `code_commit` を持つ下書きを作る（`code_commit` が無い古い run は不可）。
   起動時は作業ツリーではなく `git archive` で取り出した commit の中身を rsync する。run 同士のコード差分は `git diff <ref1> <ref2>`。
-- **推論**: 画面の各 run の行の ▷ ボタン（run 単位）、または group の ▷ ボタン（その group の最新の学習済み run）。いずれもその run 自身の `artifacts/model.pt` を読む（重みが登録されていない run・学習中・失敗・下書きは断る）（コードは今の作業ツリー。古い重みを新しい評価コードで試せる）。
+- **推論**: 画面の各 run の行の ▷ ボタン（run 単位）、または group の ▷ ボタン（その group の最新の学習済み run）。いずれもその run 自身の `artifacts/model.pt` を読む（重みが登録されていない run・学習中・失敗・下書きは断る）（コードは `[sync] source_ref` の commit。古い重みを新しい評価コードで試せる）。
 - **削除**: run を消すと、DB・画像・ログに加えて ref と学習用PCの `<run_root>/<run_id>/` も消す（学習用PCに繋がらなくても run の削除は成功する）。
 - 古い run（`code_commit` / `artifacts` が無いもの）は従来どおり読める。`git_commit`/`git_diff`/`git_untracked` 列は
   これらの run の表示用に残している。
@@ -281,7 +281,13 @@ DVC（run管理機能・checkpoint/データ管理とも）は使わない。コ
   `__pycache__/`、`checkpoints/*` `samples/*`（学習用PCで生成されるもの。中身だけ除外し、保存先のディレクトリ自体は作る）、各projectの `config.toml`
   （起動時にWebUIが書き込む）、データディレクトリ（下記）。
 - `train_webui/` は client（§5）を含むので同期対象に含める（server側のコード・`data/` は除外）。
-- 送る時に `git rev-parse HEAD`、`git diff`、未追跡（untracked）ファイルの一覧と中身を取り、runに
+- **送るコードは git の ref から作る（`[sync] source_ref`、既定 `master`）**。作業ツリーは user や他のセッションも使い、古い commit の
+  detached HEAD に止まっていることがあるため、作業ツリー・HEAD には依らない。ref の commit を `git archive` で
+  `train_webui/data/code_cache/<commit>/` に取り出し（同じ commit は作り直さない。新しい 6 個だけ残す）、そこから上の除外つきで rsync する
+  （追跡されているファイルだけが送られる。未追跡・未コミットの物は送られない）。送った commit は `runs.git_commit`（`git_info_source = "ref:<ref>"`）と
+  `runs.code_commit`（`refs/webui/runs/<run_id>`）に残り、`git_diff` / `git_untracked` は空。run ごとの上書きは `runs.sync_ref`
+  （`ctl start --ref REF`。`worktree` なら作業ツリーから）。`source_ref = ""` なら、従来どおり作業ツリーをそのまま送る（下の記述）。推論も同じ ref。
+- （`source_ref = ""` の作業ツリーから送るとき）送る時に `git rev-parse HEAD`、`git diff`、未追跡（untracked）ファイルの一覧と中身を取り、runに
   保存する（`git diff` だけだと新規ファイルが残らないため）。
 - CLIから手動実行するスクリプトは、最後に同期された時点のコードで動く。ローカルの最新コードで
   手動実行したい場合は、ユーザーが手でrsyncする。

@@ -282,6 +282,10 @@ def cmd_show(store: Store, run: sqlite3.Row, config_mode: str, log_lines: int, l
         print(f"引き継ぎ元: {run['parent_run_id']}（その run の重みから学習を始めた）")
     if "code_commit" in keys and run["code_commit"]:
         print(f"コード: {run['code_commit'][:10]}（git の refs/webui/runs/{run['run_id']}。`git diff <ref1> <ref2>` で run 同士を比べられる）")
+    if "git_commit" in keys and run["git_commit"] and run["git_info_source"] and str(run["git_info_source"]).startswith("ref:"):
+        print(f"送ったコード: {run['git_commit'][:10]}（{run['git_info_source'][4:]} の commit。作業ツリーには依らない）")
+    elif "git_commit" in keys and run["git_commit"]:
+        print(f"送ったコード: {run['git_commit'][:10]}（作業ツリーの HEAD。未コミットの変更を含むことがある）")
     for a in store.artifacts(run["run_id"]):
         size = f"{a['size'] / 1024 / 1024:.1f} MB" if a["size"] is not None else "-"
         print(f"成果物: {a['name']} ({a['kind']}, {size})  {a['path']}")
