@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import errno
 import io
 import json
 import math
@@ -26,11 +27,15 @@ from pathlib import Path
 
 # 送信の細かいタイミング。テストから差し替えられるようモジュール変数にしておく。
 FLUSH_INTERVAL_SEC = 0.5
-BATCH_SIZE = 500
-HTTP_TIMEOUT_SEC = 30.0  # 500件のバッチを server が保存し終えるまで待つ（短いと、保存は成功したのに失敗と見て警告が出る）
+BATCH_SIZE = 500  # 普段の1回の送信の件数（まとめる前の件数）
+MAX_BATCH_SIZE = 20000  # 未送信がたまっている時は1回にここまで取り出して送る（plot の点はまとめるので、送る件数はずっと少ない）
+HTTP_TIMEOUT_SEC = 30.0  # バッチを server が保存し終えるまで待つ（短いと、保存は成功したのに失敗と見て警告が出る）
+CONNECT_RETRY_SEC = (1.0, 2.0, 5.0, 10.0, 30.0)  # server に繋がらない時（再起動中など）の再送の間隔。繋がらなければ何も保存されていないので再送してよい
 HEARTBEAT_INTERVAL_SEC = 30.0
-SENDER_JOIN_TIMEOUT_SEC = 300.0  # 終了時に未送信分を送り切るまで待つ上限（短いと残りが捨てられ、グラフが途中で切れる）
+SENDER_JOIN_TIMEOUT_SEC = 300.0  # 終了時に未送信分を送り切るまで待つ上限。過ぎた分は学習用PCのファイルに残す（spool）
 HEARTBEAT_JOIN_TIMEOUT_SEC = 2.0
+BACKLOG_WARN = 50000  # 未送信がこれを超えたら警告する（送信が記録に追いついていない）
+UNSENT_DIRNAME = "unsent"  # 送れなかった結果を残すフォルダ（<run_root>/<run_id>/unsent/）。replay で取り込む
 
 _client: "_Client | None" = None
 _atexit_registered = False
@@ -71,6 +76,42 @@ class _NotFoundError(Exception):
     pass
 
 
+class _ConnectError(Exception):
+    """server に繋がらなかった（リクエストは届いていないので、再送しても二重にならない）。"""
+
+
+def _coalesce(batch: list[dict]) -> list[dict]:
+    """同じ (label, series) の plot_points を1件にまとめる（server は1件ごとに保存・commit するので、
+    1点ずつ送ると送信が記録に追いつかない）。まとめた件は最初に現れた位置に置き、点の順は保つ。
+    plot_points.step は保存されるだけで使われないので、まとめた件の step は最後の点のものにする。"""
+    out: list[dict] = []
+    merged: dict[tuple, dict] = {}
+    for item in batch:
+        if item.get("kind") != "plot_points":
+            out.append(item)
+            continue
+        key = (item.get("label"), item.get("series"))
+        m = merged.get(key)
+        if m is None:
+            m = dict(item, xs=list(item["xs"]), ys=list(item["ys"]))
+            merged[key] = m
+            out.append(m)
+        else:
+            m["xs"].extend(item["xs"])
+            m["ys"].extend(item["ys"])
+            m["step"] = item.get("step")
+            m["sent_at"] = item.get("sent_at")
+    return out
+
+
+def _unsent_path(run_id: str | None, source: str | None) -> Path:
+    """送れなかった結果の置き場。WebUIから起動されたら <run_root>/<run_id>/unsent/、手元なら ~/.cache/train_webui/unsent/<run_id>/。"""
+    art = os.environ.get("TRAIN_WEBUI_ARTIFACT_DIR")
+    base = Path(art).parent / UNSENT_DIRNAME if art else Path.home() / ".cache" / "train_webui" / UNSENT_DIRNAME / str(run_id)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return base / f"{source or 'unknown'}_{socket.gethostname()}_{os.getpid()}_{stamp}.jsonl"
+
+
 def _read_error_detail(err: urllib.error.HTTPError) -> str:
     try:
         body = json.loads(err.read().decode("utf-8"))
@@ -94,6 +135,13 @@ def _http_request(method: str, url: str, body: dict | None = None):
         if e.code == 404:
             raise _NotFoundError(str(e)) from e
         raise RuntimeError(f"HTTP {e.code}: {_read_error_detail(e)}") from e
+    except urllib.error.URLError as e:
+        # 繋がる前の失敗（connection refused 等）だけを _ConnectError にする。timeout は届いた後かもしれないので別扱い
+        # （reset は送った後にも起きうるので含めない）
+        if isinstance(e.reason, (ConnectionRefusedError, socket.gaierror)) or (
+                isinstance(e.reason, OSError) and getattr(e.reason, "errno", None) in (errno.ENETUNREACH, errno.EHOSTUNREACH)):
+            raise _ConnectError(str(e)) from e
+        raise
     if not raw:
         return None
     return json.loads(raw.decode("utf-8"))
@@ -179,11 +227,16 @@ class _Client:
         self._heartbeat_thread: threading.Thread | None = None
         self._finish_lock = threading.Lock()
         self._finished = False
+        self._abort_sender = threading.Event()  # 終了時の待ちが上限を過ぎた: 送信をやめ、残りはファイルに残す
+        self._spool_lock = threading.Lock()
+        self._spool_path: Path | None = None
+        self._spooled = 0
+        self._backlog_warned = False
 
     # --- 送信スレッド ---
 
     def _sender_loop(self) -> None:
-        while not self._stop_event.is_set() or not self._queue.empty():
+        while (not self._stop_event.is_set() or not self._queue.empty()) and not self._abort_sender.is_set():
             try:
                 item = self._queue.get(timeout=0.1)
             except queue.Empty:
@@ -198,14 +251,62 @@ class _Client:
                     batch.append(self._queue.get(timeout=remaining))
                 except queue.Empty:
                     break
-            self._send_batch(batch)
+            # 未送信がたまっている時は、待たずに大きく取り出して1回で送る（1回の往復・保存の手間を減らして追いつく）
+            while len(batch) < MAX_BATCH_SIZE:
+                try:
+                    batch.append(self._queue.get_nowait())
+                except queue.Empty:
+                    break
+            backlog = self._queue.qsize()
+            if backlog > BACKLOG_WARN and not self._backlog_warned:
+                self._backlog_warned = True
+                _warn(f"未送信の結果が{backlog}件たまっています（送信が記録に追いついていません）。"
+                      f"記録の頻度を下げるか server の負荷を確認してください")
+            self._send_batch(_coalesce(batch))
 
     def _send_batch(self, batch: list[dict]) -> None:
         body = {"run_id": self.run_id, "source": self.source, "items": batch}
-        try:
-            _http_request("POST", self.base_url + "/api/results", body)
-        except Exception as e:
-            _warn(f"結果の送信に失敗したため{len(batch)}件を破棄しました: {e}")
+        for wait in (*CONNECT_RETRY_SEC, None):
+            try:
+                _http_request("POST", self.base_url + "/api/results", body)
+                return
+            except _ConnectError as e:
+                if wait is None or self._abort_sender.is_set():
+                    self._spool(batch, f"送信に失敗: {e}")
+                    return
+                time.sleep(wait)
+            except Exception as e:  # timeout（保存されたか分からない）・HTTP エラーは再送せずファイルに残す
+                self._spool(batch, f"送信に失敗: {e}")
+                return
+
+    # --- 送れなかった結果を学習用PCのファイルに残す（python -m train_webui.client.replay で取り込む） ---
+
+    def _spool(self, items: list[dict], reason: str) -> None:
+        if not items:
+            return
+        with self._spool_lock:
+            try:
+                if self._spool_path is None:
+                    self._spool_path = _unsent_path(self.run_id, self.source)
+                    self._spool_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(self._spool_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"run_id": self.run_id, "source": self.source, "items": items},
+                                       ensure_ascii=False) + "\n")
+                self._spooled += len(items)
+                _warn(f"{reason}。{len(items)}件を {self._spool_path} に残しました（累計{self._spooled}件。"
+                      f"取り込みは python -m train_webui.client.replay）")
+            except Exception as e:
+                _warn(f"{reason}。さらにファイルへの保存にも失敗したため{len(items)}件を破棄しました: {e}")
+
+    def _drain_to_spool(self) -> None:
+        items: list[dict] = []
+        while True:
+            try:
+                items.append(self._queue.get_nowait())
+            except queue.Empty:
+                break
+        for i in range(0, len(items), MAX_BATCH_SIZE):
+            self._spool(_coalesce(items[i:i + MAX_BATCH_SIZE]), "終了までに送り切れませんでした")
 
     # --- heartbeat ---
 
@@ -316,7 +417,12 @@ class _Client:
         if self._sender_thread is not None:
             self._sender_thread.join(timeout=SENDER_JOIN_TIMEOUT_SEC)
             if self._sender_thread.is_alive():
-                _warn(f"未送信の結果が約{self._queue.qsize()}件残ったまま終了します（破棄されます）")
+                _warn(f"{SENDER_JOIN_TIMEOUT_SEC:g}秒で送り切れませんでした。未送信の約{self._queue.qsize()}件はファイルに残します")
+                self._abort_sender.set()
+                self._drain_to_spool()
+                # 送信中だったバッチの結果を待つ（失敗すれば送信スレッドがファイルに残す）
+                self._sender_thread.join(timeout=HTTP_TIMEOUT_SEC + 5.0)
+                self._drain_to_spool()
         if self._heartbeat_thread is not None:
             self._heartbeat_stop.set()
             self._heartbeat_thread.join(timeout=HEARTBEAT_JOIN_TIMEOUT_SEC)

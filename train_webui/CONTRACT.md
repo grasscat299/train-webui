@@ -231,8 +231,13 @@ design.md §5 のとおり。追加の取り決め：
   `Plot` をクラスとして export
   （モジュールレベルの状態を1つ持つ、wandb と同じ書き味）。`init` 前に `log` 等が呼ばれたら warning で無視。
 - 送信は daemon スレッド＋キュー。`log` はキューに積むだけで即 return。まとめて `POST /api/results`
-  （例: 0.5秒ごと or 50件ごと）。送信タイムアウトは短く（例 5秒）、失敗は warning を出して捨てる。
-- `finish()` はキューを吐き出して（最大数秒待つ）スレッドを止める。自分で作った run（new_run経由）なら
+  （0.5秒ごと or 500件ごと。未送信がたまっていれば最大 20000 件を1回で）。送る前に同じ (label, series) の
+  plot_points を1件にまとめる（server は item ごとに commit するので、1点ずつだと送信が記録に追いつかない。2026-11-17）。
+- 送れなかった分は捨てずに学習用PCのファイル `<run_root>/<run_id>/unsent/*.jsonl`（手元の実行なら
+  `~/.cache/train_webui/unsent/<run_id>/`）に残す。server に繋がらない時（再起動中など）は間隔をあけて再送してから残す。
+  timeout・HTTP エラーは保存されたか分からないので再送せずに残す。取り込みは hub で
+  `venv/bin/python -m train_webui.client.replay --ssh gpu1 --run-id <run_id>`（取り込めたファイルは `.done` にする）。
+- `finish()` はキューを吐き出して（最大 300 秒待つ。過ぎたら残りは上のファイルに残す）スレッドを止める。自分で作った run（new_run経由）なら
   `POST /api/runs/{id}/finish` を送る。`atexit` で `finish()` 未呼び出しなら自動で呼ぶ。
 - 自分で作った run の場合だけ、30秒ごとに heartbeat を送り、未処理例外時（`sys.excepthook` をチェーン）は
   traceback を付けて status=failed で finish を送る。
