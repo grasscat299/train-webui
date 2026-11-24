@@ -1,0 +1,9 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+train_webui/server.toml
+train_webui/data/
+train_webui/frontend/node_modules/
+train_webui/frontend/dist/
